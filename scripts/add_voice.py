@@ -290,13 +290,14 @@ def wav_bytes(samples):
 
 
 def prepared(name, theme, description, data, extension, title="", check_sound=True):
-    """A submission checked and its sound made uniform, nothing written yet."""
-    name = name.strip().lower()
+    """A submission checked and its sound made uniform, nothing written yet.
+    A name is forgiven its capitals and spaces: "Cat Meow" is cat-meow."""
+    name = re.sub(r"[\s_]+", "-", name.strip().lower()).strip("-")
     theme = theme.strip().lower()
     description = " ".join(description.split())
     check_words(name, description, title)
     if not NAME.match(name):
-        raise Refused("the name takes 2 to 20 lowercase letters, digits or dashes")
+        raise Refused("the name takes 2 to 20 letters, digits or dashes, like cat-meow")
     if name in RESERVED or (VOICES / name).exists() or name in removed():
         raise Refused(f"there is already a voice named {name}: pick another name")
     if theme not in THEMES:
@@ -405,7 +406,7 @@ def submission():
     check_words(title, fields.get("voice name", ""), fields.get("description", ""))
     url = ATTACHMENT.search(fields.get("sound", ""))
     if url is None:
-        raise Refused("no zip attached: zip your sound file and drag the zip into the Sound field")
+        raise Refused("no sound attached: drag your sound file (or a zip of it) into the Sound field")
     data, extension = audio_from(download(url.group(0)), url.group(0))
     return title, fields, data, extension
 
