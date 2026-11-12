@@ -98,6 +98,14 @@
       "variants": 5,
       "spread": 5,
       "vowels": true
+    },
+    {
+      "name": "cat-meow",
+      "author": "DoubleV840",
+      "theme": "cute",
+      "description": "cat meow",
+      "license": "CC0-1.0",
+      "added": "2026-11-12"
     }
   ],
   "removed": []
