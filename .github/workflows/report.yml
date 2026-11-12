@@ -1,0 +1,77 @@
+# Handles a report: a community voice is removed once three different people
+# have reported it (accounts at least a week old), or at once when a
+# maintainer does. Removed, it leaves the site, the menus, and every machine
+# that installed it.
+name: Handle a report
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  report:
+    if: contains(github.event.issue.body, '### Voice') && contains(github.event.issue.body, '### Why')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Count the reports
+        id: count
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+          ASSOCIATION: ${{ github.event.issue.author_association }}
+        run: python3 scripts/report.py >> "$GITHUB_OUTPUT"
+
+      - name: Remove the voice
+        if: steps.count.outputs.action == 'remove'
+        env:
+          NAME: ${{ steps.count.outputs.name }}
+          ISSUES: ${{ steps.count.outputs.issues }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # Onto the latest catalog, again if another change got there first.
+          for attempt in 1 2 3 4 5; do
+            git fetch -q "$remote" main && git reset -q --hard FETCH_HEAD
+            [ -d "voices/$NAME" ] || break  # already removed
+            python3 scripts/add_voice.py --remove "$NAME"
+            git add -A voices catalog.json removed.json
+            git commit -q -m "Remove voice $NAME, reported"
+            git push -q "$remote" HEAD:main && break
+            sleep $((attempt * 3))
+          done
+          for number in $ISSUES; do
+            gh issue close "$number" --repo "$GITHUB_REPOSITORY" \
+              --comment "Thanks: \`$NAME\` was removed, from the site and from every Blip that had it."
+          done
+
+      - name: Note the report
+        if: steps.count.outputs.action == 'count'
+        env:
+          NAME: ${{ steps.count.outputs.name }}
+          COUNT: ${{ steps.count.outputs.count }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" \
+            --body "Thanks, noted: \`$NAME\` has $COUNT of 3 reports. At 3, from different people with accounts at least a week old, it is removed automatically."
+
+      - name: No such voice
+        if: steps.count.outputs.action == 'ignore'
+        run: |
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason "not planned" \
+            --comment "There's no community voice by that name: check its name on https://blip.ivwi.fr"

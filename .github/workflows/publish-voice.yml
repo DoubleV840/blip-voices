@@ -1,0 +1,134 @@
+# Publishes a submission as soon as it is posted or edited, if it passes the
+# checks: no one has to listen to it first. What slips through, the
+# community reports (report.yml).
+#
+# Two jobs: `check` handles the submitted file with no write access and hands
+# on only the voice it made; `publish` adds that voice and never opens the
+# submitted file.
+name: Publish a voice
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  check:
+    if: github.event.issue.state == 'open' && contains(github.event.issue.body, '### Sound')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      status: ${{ steps.check.outputs.status }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg
+        run: command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
+
+      - name: Look up the author's account
+        id: author
+        env:
+          AUTHOR: ${{ github.event.issue.user.login }}
+        run: echo "created=$(gh api "users/$AUTHOR" --jq .created_at)" >> "$GITHUB_OUTPUT"
+
+      # The issue's text goes in through the environment, never into a command.
+      - name: Check the submission
+        id: check
+        env:
+          GH_TOKEN: ""
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          AUTHOR_CREATED: ${{ steps.author.outputs.created }}
+        run: python3 scripts/add_voice.py --prepare-issue "$RUNNER_TEMP/voice" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.status == 'ok'
+        with:
+          name: voice
+          path: ${{ runner.temp }}/voice
+          retention-days: 1
+
+      - name: Remove an offensive submission
+        if: steps.check.outputs.status == 'offensive'
+        run: |
+          gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --title "Voice: removed" \
+            --body "Removed automatically: this submission held a word that isn't allowed. If that's a mistake, submit again with other words."
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason "not planned"
+          gh issue lock "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason spam
+
+      - name: Say what to fix
+        if: steps.check.outputs.status == 'invalid'
+        env:
+          REASON: ${{ steps.check.outputs.reason }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" \
+            --body "This voice can't be added yet: $REASON. Edit the issue to fix it, and it is checked again."
+
+  publish:
+    needs: check
+    if: needs.check.outputs.status == 'ok'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: voice
+          path: ${{ runner.temp }}/voice
+
+      # Onto the latest catalog, again if another voice got there first.
+      - name: Publish
+        id: publish
+        env:
+          ERROR_FILE: ${{ runner.temp }}/error.txt
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          for attempt in 1 2 3 4 5; do
+            git fetch -q "$remote" main && git reset -q --hard FETCH_HEAD
+            name=$(python3 scripts/add_voice.py --publish "$RUNNER_TEMP/voice" | sed -n 's/^name=//p')
+            [ -n "$name" ] || exit 1
+            git add voices catalog.json
+            git commit -q -m "Add voice $name (#$ISSUE)"
+            if git push -q "$remote" HEAD:main; then echo "name=$name" >> "$GITHUB_OUTPUT"; exit 0; fi
+            sleep $((attempt * 3))
+          done
+          exit 1
+
+      - name: Thank the author
+        env:
+          NAME: ${{ steps.publish.outputs.name }}
+        run: |
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --comment "Thank you! Your voice is live: everyone can now type \`/blip voice $NAME\` in Claude Code, or hear it on https://blip.ivwi.fr"
+
+      - name: Say what went wrong
+        if: failure()
+        env:
+          ERROR_FILE: ${{ runner.temp }}/error.txt
+        run: |
+          reason="$(cat "$ERROR_FILE" 2>/dev/null || echo "something went wrong on our side")"
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "This voice couldn't be published: $reason. Edit the issue to try again."

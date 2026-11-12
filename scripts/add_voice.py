@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Checks, adds and removes community voices.
 
-In the GitHub workflows:
+In the GitHub workflow that publishes a submission, in two jobs:
 
-    python3 scripts/add_voice.py --check-issue   # a new submission: is it fit for review?
-    python3 scripts/add_voice.py --from-issue    # an approved one: add it
+    python3 scripts/add_voice.py --prepare-issue DIR   # check it, write the voice to DIR
+    python3 scripts/add_voice.py --publish DIR         # check DIR again, add it to the catalog
 
-both read ISSUE_TITLE, ISSUE_BODY and ISSUE_AUTHOR from the environment and
-print `key=value` lines for the workflow's outputs (status, name, reason).
+The first reads ISSUE_TITLE, ISSUE_BODY, ISSUE_AUTHOR and AUTHOR_CREATED (the
+account's creation date) from the environment and handles the submitted file,
+with no credentials; the second never opens that file. Both print `key=value`
+lines for the workflow (status, name, reason).
 
 By hand:
 
@@ -63,6 +65,10 @@ TARGET_RMS = 0.12
 PEAK = 0.9
 MAX_DOWNLOAD = 2 * 1024 * 1024
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,19}$")
+LOGIN = re.compile(r"^[A-Za-z0-9-]{1,39}$")
+# Against throwaway accounts and floods.
+MIN_ACCOUNT_DAYS = 7
+MAX_PER_DAY = 3
 AUDIO = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".aif", ".aiff", ".caf"}
 # A file attached to an issue: GitHub takes audio zipped.
 ATTACHMENT = re.compile(r"https://github\.com/(?:user-attachments/files|[\w.-]+/[\w.-]+/files)/\d+/[^\s)\]]+")
@@ -283,7 +289,7 @@ def wav_bytes(samples):
 # ---- The catalog -----------------------------------------------------------
 
 
-def prepared(name, theme, description, data, extension, title=""):
+def prepared(name, theme, description, data, extension, title="", check_sound=True):
     """A submission checked and its sound made uniform, nothing written yet."""
     name = name.strip().lower()
     theme = theme.strip().lower()
@@ -297,12 +303,17 @@ def prepared(name, theme, description, data, extension, title=""):
         raise Refused(f"the theme is one of {', '.join(THEMES)}")
     if not 1 <= len(description) <= 60:
         raise Refused("the description takes 1 to 60 characters")
-    return name, theme, description, wav_bytes(uniform(*decoded(data, extension)))
+    return name, theme, description, wav_bytes(uniform(*decoded(data, extension))) if check_sound else b""
 
 
 def add(name, author, theme, description, data, extension=".wav"):
     name, theme, description, wav = prepared(name, theme, description, data, extension)
-    folder = VOICES / name
+    write_voice(VOICES / name, name, author, theme, description, wav)
+    build_catalog()
+    return name
+
+
+def write_voice(folder, name, author, theme, description, wav):
     folder.mkdir(parents=True)
     (folder / "voice.wav").write_bytes(wav)
     (folder / "voice.txt").write_text(base64.b64encode(wav).decode() + "\n")
@@ -315,8 +326,46 @@ def add(name, author, theme, description, data, extension=".wav"):
         "added": datetime.date.today().isoformat(),
     }
     (folder / "voice.json").write_text(json.dumps(meta, indent=2) + "\n")
+
+
+def publish(folder):
+    """Adds a voice prepared by --prepare-issue, checked again without ffmpeg:
+    its fields, its .wav's shape, its .txt matching it."""
+    meta = json.loads((folder / "voice.json").read_text())
+    wav = (folder / "voice.wav").read_bytes()
+    name, author = str(meta.get("name", "")), str(meta.get("author", ""))
+    if not LOGIN.match(author):
+        raise Refused("the author is not a GitHub login")
+    name, theme, description, _ = prepared(name, str(meta.get("theme", "")), str(meta.get("description", "")), b"", ".wav", check_sound=False)
+    with wave.open(io.BytesIO(wav)) as sound:
+        shape = (sound.getnchannels(), sound.getsampwidth(), sound.getframerate())
+        frames = sound.getnframes()
+    if shape != (1, 2, RATE) or frames > MAX_SECONDS * RATE + 1:
+        raise Refused("the prepared sound is not what --prepare-issue writes")
+    if (folder / "voice.txt").read_text().strip() != base64.b64encode(wav).decode():
+        raise Refused("the prepared voice.txt does not match its voice.wav")
+    write_voice(VOICES / name, name, author, theme, description, wav)
     build_catalog()
     return name
+
+
+def check_author(author, created):
+    """Refuses an account younger than a week, and a fourth voice in a day."""
+    if not LOGIN.match(author):
+        raise Refused("the author is not a GitHub login")
+    try:
+        born = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise Refused("the author's account could not be checked") from error
+    if datetime.datetime.now(datetime.timezone.utc) - born < datetime.timedelta(days=MIN_ACCOUNT_DAYS):
+        raise Refused(f"voices are shared from GitHub accounts at least {MIN_ACCOUNT_DAYS} days old: come back soon")
+    today = datetime.date.today().isoformat()
+    shared_today = [
+        v for v in (json.loads(p.read_text()) for p in VOICES.glob("*/voice.json"))
+        if v.get("author") == author and v.get("added") == today
+    ]
+    if len(shared_today) >= MAX_PER_DAY:
+        raise Refused(f"{MAX_PER_DAY} voices a day at most: this one is welcome tomorrow")
 
 
 def removed():
@@ -361,10 +410,22 @@ def submission():
     return title, fields, data, extension
 
 
+def prepare_issue(folder):
+    """Checks the submission in the environment and writes its voice to `folder`."""
+    author = os.environ.get("ISSUE_AUTHOR", "").strip()
+    title, fields, data, extension = submission()
+    check_author(author, os.environ.get("AUTHOR_CREATED", ""))
+    name, theme, description, wav = prepared(
+        fields.get("voice name", ""), fields.get("theme", ""), fields.get("description", ""), data, extension, title
+    )
+    write_voice(folder, name, author, theme, description, wav)
+    return name, theme, (len(wav) - 44) / 2 / RATE
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--check-issue", action="store_true", help="check the submission in the environment")
-    parser.add_argument("--from-issue", action="store_true", help="add the approved submission in the environment")
+    parser.add_argument("--prepare-issue", metavar="DIR", type=Path, help="check the submission in the environment")
+    parser.add_argument("--publish", metavar="DIR", type=Path, help="add a voice --prepare-issue wrote")
     parser.add_argument("--remove", metavar="NAME", help="remove a community voice")
     parser.add_argument("--catalog-only", action="store_true", help="only rebuild catalog.json")
     parser.add_argument("--name")
@@ -380,25 +441,19 @@ def main():
         elif args.remove:
             remove(args.remove)
             print(f"name={args.remove}")
-        elif args.check_issue:
-            title, fields, data, extension = submission()
-            name, theme, _, wav = prepared(
-                fields.get("voice name", ""), fields.get("theme", ""), fields.get("description", ""), data, extension, title
-            )
-            print(f"status=ok\nname={name}\ntheme={theme}\nseconds={(len(wav) - 44) / 2 / RATE:.2f}")
-        elif args.from_issue:
-            _, fields, data, extension = submission()
-            author = os.environ.get("ISSUE_AUTHOR", "").strip()
-            name = add(fields.get("voice name", ""), author, fields.get("theme", ""), fields.get("description", ""), data, extension)
-            print(f"status=ok\nname={name}")
+        elif args.prepare_issue:
+            name, theme, seconds = prepare_issue(args.prepare_issue)
+            print(f"status=ok\nname={name}\ntheme={theme}\nseconds={seconds:.2f}")
+        elif args.publish:
+            print(f"status=ok\nname={publish(args.publish)}")
         else:
             if not (args.name and args.author and args.theme and args.description and args.file):
                 parser.error("give --name, --author, --theme, --description and a sound file")
             name = add(args.name, args.author, args.theme, args.description, args.file.read_bytes(), args.file.suffix.lower())
             print(f"name={name}")
     except Refused as refused:
-        # Checking, a refusal is an answer for the workflow, not a failure.
-        if args.check_issue:
+        # Checking a submission, a refusal is an answer, not a failure.
+        if args.prepare_issue:
             status = "offensive" if isinstance(refused, Offensive) else "invalid"
             print(f"status={status}\nreason={refused}")
             return

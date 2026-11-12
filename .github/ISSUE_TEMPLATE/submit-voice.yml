@@ -8,7 +8,8 @@ body:
       value: |
         One short sound, under half a second: Blip plays it on every letter and changes its pitch itself.
         Sounds only, no videos: `.wav`, `.mp3`, `.m4a`, `.ogg`, `.flac`… Zip the file and drop the zip in the **Sound** field.
-        It is checked automatically, then a maintainer listens to it. Once approved, it shows on [blip.ivwi.fr](https://blip.ivwi.fr) and in everyone's `/blip voice` menu.
+        It is checked automatically and, if it passes, goes live within minutes on [blip.ivwi.fr](https://blip.ivwi.fr) and in everyone's `/blip voice` menu.
+        Shared from a GitHub account at least a week old, three voices a day at most. A voice three people report is removed.
   - type: input
     id: name
     attributes:

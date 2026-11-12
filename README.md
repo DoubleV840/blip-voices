@@ -20,16 +20,15 @@ In Claude Code: `/blip voice` (menu) or `/blip voice <name>`.
 2. Zip it.
 3. Drop it in the [form](https://github.com/DoubleV840/blip-voices/issues/new?template=submit-voice.yml).
 
-Once a maintainer approves it, it goes live on the site and in everyone's `/blip voice` menu.
+It is checked automatically and, if it passes, goes live within minutes on the site and in everyone's `/blip voice` menu. A voice that three people [report](https://github.com/DoubleV840/blip-voices/issues/new?template=report-voice.yml) is removed, everywhere.
 
 <details>
 <summary><b>For maintainers</b></summary>
 <br>
 
-- **Every submission is checked at once** ([check-voice](.github/workflows/check-voice.yml)): its words against [`scripts/blocklist.txt`](scripts/blocklist.txt) and the English and French [LDNOOBW](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words) lists, its file (a sound, never a video), its sound. An offensive one is wiped, closed and locked; an unfit one is told what to fix; past three open submissions, a person's next ones are closed.
-- **Nothing goes live until you listen to it** and label it `approved`: [add-voice](.github/workflows/add-voice.yml) makes it uniform (mono, 16-bit, 22050 Hz, trimmed, at most 0.3 s, levelled), publishes it and closes the issue.
-- **Remove a voice**: Actions → *Remove a voice* → Run workflow. It leaves the site and the menus, and Blip deletes it from every machine that installed it.
-- **Reports** come through the *Report a voice* form, linked from each community voice on the site.
+- **Submissions publish themselves** ([publish-voice](.github/workflows/publish-voice.yml)) when they pass: words checked against [`scripts/blocklist.txt`](scripts/blocklist.txt) and the English and French [LDNOOBW](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words) lists, a sound and never a video, an account at least a week old, three voices a day per person. The sound is made uniform (mono, 16-bit, 22050 Hz, trimmed, at most 0.3 s, levelled). An offensive submission is wiped, closed and locked; an unfit one is told what to fix.
+- **Reports remove voices** ([report](.github/workflows/report.yml)): three reports from different people (accounts at least a week old), or one from a maintainer. A removed voice leaves the site, the menus, and every machine that installed it. You are notified of every report as the repository's owner.
+- **Remove a voice yourself**: Actions → *Remove a voice* → Run workflow, or report it. To bring one back, revert its removal commit and take its name out of `removed.json`.
 - On GitHub, Settings → Moderation options → *Interaction limits* can keep brand-new accounts out for a while.
 - By hand: `python3 scripts/add_voice.py --name bloop --author someone --theme cute --description "a wet bloop" bloop.mp3`, or `--remove bloop`.
 

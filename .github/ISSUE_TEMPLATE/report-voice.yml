@@ -1,5 +1,5 @@
 name: Report a voice
-description: A voice that shouldn't be there
+description: A voice that shouldn't be there. Three reports from different people remove it.
 title: "Report: "
 labels: ["report"]
 body:
