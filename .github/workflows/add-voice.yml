@@ -1,0 +1,64 @@
+# Adds a submitted voice once a maintainer labels its issue "approved".
+name: Add a voice
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: add-voice
+  cancel-in-progress: false
+
+jobs:
+  add:
+    if: github.event.label.name == 'approved'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The issue's text goes in through the environment, never into a command.
+      - name: Check and convert the sound
+        id: add
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ERROR_FILE: ${{ runner.temp }}/error.txt
+        run: python3 scripts/add_voice.py --from-issue >> "$GITHUB_OUTPUT"
+
+      - name: Publish it
+        env:
+          NAME: ${{ steps.add.outputs.name }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add voices catalog.json
+          git commit -m "Add voice $NAME (#$ISSUE)"
+          git push
+
+      - name: Thank the author
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ steps.add.outputs.name }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --comment "Thank you! Your voice is live: everyone can now type \`/blip voice $NAME\` in Claude Code, or hear it on https://blip.ivwi.fr"
+
+      - name: Explain what went wrong
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          ERROR_FILE: ${{ runner.temp }}/error.txt
+        run: |
+          reason="$(cat "$ERROR_FILE" 2>/dev/null || echo "something went wrong on our side, see the workflow log")"
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "This voice couldn't be added: $reason. Edit the issue, then a maintainer can approve it again."
+          gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --remove-label approved

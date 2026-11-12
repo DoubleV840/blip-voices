@@ -1,0 +1,85 @@
+{
+  "voices": [
+    {
+      "name": "classic",
+      "author": "blip",
+      "description": "square-wave blip, the classic RPG text box",
+      "official": true,
+      "variants": 1,
+      "spread": 5,
+      "vowels": false
+    },
+    {
+      "name": "nes",
+      "author": "blip",
+      "description": "thin 8-bit pulse, like an old cartridge",
+      "official": true,
+      "variants": 1,
+      "spread": 5,
+      "vowels": false
+    },
+    {
+      "name": "soft",
+      "author": "blip",
+      "description": "gentle sine, easy on the ears",
+      "official": true,
+      "variants": 1,
+      "spread": 4,
+      "vowels": false
+    },
+    {
+      "name": "bubble",
+      "author": "blip",
+      "description": "little rising pops",
+      "official": true,
+      "variants": 1,
+      "spread": 6,
+      "vowels": false
+    },
+    {
+      "name": "typewriter",
+      "author": "blip",
+      "description": "mechanical keys clacking",
+      "official": true,
+      "variants": 3,
+      "spread": 1,
+      "vowels": false
+    },
+    {
+      "name": "robot",
+      "author": "blip",
+      "description": "metallic, ring-modulated",
+      "official": true,
+      "variants": 1,
+      "spread": 3,
+      "vowels": false
+    },
+    {
+      "name": "deep",
+      "author": "blip",
+      "description": "low and ominous, boss-fight energy",
+      "official": true,
+      "variants": 1,
+      "spread": 3,
+      "vowels": false
+    },
+    {
+      "name": "chirp",
+      "author": "blip",
+      "description": "tiny bird chirps",
+      "official": true,
+      "variants": 1,
+      "spread": 7,
+      "vowels": false
+    },
+    {
+      "name": "critter",
+      "author": "blip",
+      "description": "a babbling little creature (vowel sounds)",
+      "official": true,
+      "variants": 5,
+      "spread": 5,
+      "vowels": true
+    }
+  ]
+}

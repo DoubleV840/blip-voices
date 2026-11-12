@@ -1,0 +1,42 @@
+name: Submit a voice
+description: Share a voice for Blip with everyone
+title: "Voice: "
+labels: ["voice"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One short sound, under half a second: Blip plays it on every letter and changes its pitch itself.
+        Zip your `.wav` and drop the zip in the **Sound** field. Once approved, your voice shows on [blip.ivwi.fr](https://blip.ivwi.fr) and in everyone's `/blip voice` menu.
+  - type: input
+    id: name
+    attributes:
+      label: Voice name
+      description: 2 to 20 lowercase letters, digits or dashes. People will type `/blip voice <name>`.
+      placeholder: bloop
+    validations:
+      required: true
+  - type: input
+    id: description
+    attributes:
+      label: Description
+      description: A few words, 60 characters at most.
+      placeholder: a wet little bloop
+    validations:
+      required: true
+  - type: textarea
+    id: sound
+    attributes:
+      label: Sound
+      description: Drag your zipped `.wav` here.
+    validations:
+      required: true
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Rules
+      options:
+        - label: I made this sound myself, or it is in the public domain, and I share it under CC0.
+          required: true
+        - label: It is not taken from a game, a film, a show or a song.
+          required: true

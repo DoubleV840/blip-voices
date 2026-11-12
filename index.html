@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blip voices</title>
+<meta name="description" content="Voices for Blip, the plugin that makes Claude Code talk like an RPG character.">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #17162e;
+    --card: #232146;
+    --line: #36336c;
+    --text: #fff6ea;
+    --muted: #a9a5d8;
+    --accent: #e07a4f;
+    --ink: #1a1830;
+    --pixel: "Press Start 2P", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header, main, footer { max-width: 960px; margin: 0 auto; padding: 0 16px; }
+  header { text-align: center; padding-top: 56px; padding-bottom: 40px; }
+  header img { image-rendering: pixelated; }
+  h1 { font: 24px/1.4 var(--pixel); margin: 20px 0 12px; }
+  header p { color: var(--muted); margin: 0 0 24px; }
+  code { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .copy {
+    display: inline-flex; align-items: center; gap: 12px; max-width: 100%;
+    background: var(--card); border: 2px solid var(--line); border-radius: 6px;
+    padding: 8px 12px; text-align: left;
+  }
+  .copy code { overflow-wrap: anywhere; }
+  .copy span { color: var(--muted); font-size: 13px; flex: none; }
+  .copy:hover { border-color: var(--accent); }
+  .grid {
+    list-style: none; margin: 0; padding: 0;
+    display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+  .card {
+    background: var(--card); border: 2px solid var(--line); border-radius: 8px;
+    padding: 16px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .card.playing { border-color: var(--accent); }
+  .top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  h3 { font: 13px/1.6 var(--pixel); margin: 0; overflow-wrap: anywhere; }
+  .tag { font-size: 12px; color: var(--muted); }
+  .desc { margin: 0; color: var(--muted); min-height: 3em; }
+  .playing .desc { color: var(--text); }
+  .actions { display: flex; gap: 8px; align-items: center; margin-top: auto; }
+  .actions .copy { flex: 1; min-width: 0; padding: 6px 10px; }
+  .actions .copy code { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .play {
+    flex: none; width: 40px; height: 34px; border-radius: 6px; border: 0;
+    background: var(--accent); color: var(--ink); font-size: 14px;
+  }
+  .empty { color: var(--muted); text-align: center; grid-column: 1 / -1; }
+  .share { text-align: center; padding: 56px 0 24px; }
+  h2 { font: 16px/1.5 var(--pixel); margin: 0 0 12px; }
+  .share p { color: var(--muted); margin: 0 0 20px; }
+  .button {
+    display: inline-block; background: var(--accent); color: var(--ink);
+    font: 12px/1 var(--pixel); padding: 14px 18px; border-radius: 6px; text-decoration: none;
+  }
+  footer { text-align: center; color: var(--muted); padding-top: 24px; padding-bottom: 40px; font-size: 14px; }
+  footer a { color: var(--muted); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <img src="icon.png" width="72" height="72" alt="">
+  <h1>Blip voices</h1>
+  <p>Make Claude Code talk like an RPG character. Pick a voice, then type its command in Claude Code.</p>
+  <button class="copy" data-copy="/plugin install blip --marketplace DoubleV840/blip">
+    <code>/plugin install blip --marketplace DoubleV840/blip</code><span>copy</span>
+  </button>
+</header>
+
+<main>
+  <ul class="grid" id="voices"><li class="empty">Loading the voices…</li></ul>
+
+  <section class="share">
+    <h2>Got a sound?</h2>
+    <p>One short sound, under half a second, that you made yourself.</p>
+    <a class="button" href="https://github.com/DoubleV840/blip-voices/issues/new?template=submit-voice.yml">Share your voice</a>
+  </section>
+</main>
+
+<footer>
+  <a href="https://github.com/DoubleV840/blip">Blip on GitHub</a> · <a href="https://ko-fi.com/blipivwi">Support on Ko-fi</a>
+</footer>
+
+<script>
+// The catalog and the community's sounds come straight from the repository,
+// so a voice shows as soon as it is added. The built-in voices' sounds come
+// from Blip's own repository.
+const RAW = 'https://raw.githubusercontent.com/DoubleV840'
+const CATALOG = `${RAW}/blip-voices/main/catalog.json`
+
+// Blip's typewriter, as the plugin plays it: 30 letters a second, pauses at
+// commas and sentence ends, a blip on a letter at most every 45 ms, each cut
+// where the next starts, a step or two of pitch per letter, a little random
+// detune, questions rising at the end.
+const LETTER = 1 / 30
+const SHORT_PAUSE = 0.12
+const LONG_PAUSE = 0.3
+const GAP = 0.045
+const DETUNE = 0.35
+
+let audio
+const buffers = new Map()
+
+const sampleUrls = voice =>
+  voice.official
+    ? Array.from({ length: voice.variants || 1 }, (_, v) => `${RAW}/blip/main/sounds/${voice.name}/${v}_12.wav`)
+    : [`${RAW}/blip-voices/main/voices/${voice.name}/voice.wav`]
+
+async function samplesOf(voice) {
+  if (!buffers.has(voice.name)) {
+    const decoded = Promise.all(
+      sampleUrls(voice).map(async url => audio.decodeAudioData(await (await fetch(url)).arrayBuffer())),
+    )
+    buffers.set(voice.name, decoded)
+  }
+  return buffers.get(voice.name)
+}
+
+// Plays `text` in the voice; calls `onType` with each prefix as it appears.
+// Resolves when done.
+async function speak(voice, text, onType) {
+  audio ??= new AudioContext()
+  await audio.resume()
+  const samples = await samplesOf(voice)
+  const spread = voice.spread ?? 4
+  const start = audio.currentTime + 0.05
+
+  const times = []
+  let t = 0
+  for (let i = 0; i < text.length; i++) {
+    times.push(t)
+    const c = text[i]
+    const after = text[i + 1] ?? ' '
+    t += LETTER
+    if (/[.!?]/.test(c) && /\s/.test(after)) t += LONG_PAUSE
+    else if (/[,;:]/.test(c) && /\s/.test(after)) t += SHORT_PAUSE
+  }
+
+  const blips = []
+  let last = -Infinity
+  for (let i = 0; i < text.length; i++) {
+    if (!/[\p{L}\p{N}]/u.test(text[i]) || times[i] - last < GAP) continue
+    last = times[i]
+    const letter = text[i].toLowerCase()
+    const code = letter.codePointAt(0)
+    const vowel = 'aeiou'.indexOf(letter)
+    const ending = text.slice(i).match(/[.!?]/)?.[0]
+    const isNearEnd = /[.!?]/.test(text.slice(i, i + 8))
+    const contour = !isNearEnd ? 0 : ending === '?' ? 3 : ending === '.' ? -1 : 0
+    const move = Math.round((((code % 5) - 2) * spread) / 5) + (vowel >= 0 ? 1 : 0)
+    const variant = voice.vowels && vowel >= 0 ? vowel : code % samples.length
+    blips.push({ at: times[i], buffer: samples[variant], semitones: move + contour + (Math.random() * 2 - 1) * DETUNE })
+  }
+
+  blips.forEach((blip, k) => {
+    const source = audio.createBufferSource()
+    const gain = audio.createGain()
+    source.buffer = blip.buffer
+    source.playbackRate.value = 2 ** (blip.semitones / 12)
+    source.connect(gain).connect(audio.destination)
+    const at = start + blip.at
+    const end = Math.min(at + blip.buffer.duration, start + (blips[k + 1]?.at ?? Infinity))
+    gain.gain.setValueAtTime(0.8, at)
+    gain.gain.setValueAtTime(0.8, Math.max(at, end - 0.004))
+    gain.gain.linearRampToValueAtTime(0, end)
+    source.start(at)
+    source.stop(end + 0.01)
+  })
+
+  return new Promise(resolve => {
+    const frame = () => {
+      const elapsed = audio.currentTime - start
+      const shown = times.filter(time => time <= elapsed).length
+      onType(text.slice(0, shown))
+      if (shown < text.length) requestAnimationFrame(frame)
+      else setTimeout(resolve, 600)
+    }
+    requestAnimationFrame(frame)
+  })
+}
+
+function copyButton(button) {
+  button.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(button.dataset.copy)
+    const label = button.querySelector('span')
+    if (label) {
+      label.textContent = 'copied'
+      setTimeout(() => (label.textContent = 'copy'), 1500)
+    }
+  })
+}
+
+function card(voice) {
+  const item = document.createElement('li')
+  item.className = 'card'
+  item.innerHTML = `
+    <div class="top"><h3></h3><span class="tag"></span></div>
+    <p class="desc"></p>
+    <div class="actions">
+      <button class="play" aria-label="Listen">▶</button>
+      <button class="copy"><code></code></button>
+    </div>`
+  item.querySelector('h3').textContent = voice.name
+  item.querySelector('.tag').textContent = voice.official ? 'built in' : `by ${voice.author}`
+  const desc = item.querySelector('.desc')
+  desc.textContent = voice.description
+  const command = `/blip voice ${voice.name}`
+  const copy = item.querySelector('.copy')
+  copy.dataset.copy = command
+  copy.querySelector('code').textContent = command
+  copyButton(copy)
+
+  const play = item.querySelector('.play')
+  play.setAttribute('aria-label', `Listen to ${voice.name}`)
+  play.addEventListener('click', async () => {
+    if (item.classList.contains('playing')) return
+    item.classList.add('playing')
+    try {
+      await speak(voice, `Hello there! I am ${voice.name}. Shall we write some code?`, typed => (desc.textContent = typed))
+    } catch {
+      desc.textContent = "Couldn't play this voice."
+      await new Promise(resolve => setTimeout(resolve, 1500))
+    }
+    desc.textContent = voice.description
+    item.classList.remove('playing')
+  })
+
+  return item
+}
+
+async function main() {
+  document.querySelectorAll('header .copy').forEach(copyButton)
+  const list = document.getElementById('voices')
+  try {
+    const local = () => fetch('catalog.json')
+    const response = await fetch(CATALOG).then(r => (r.ok ? r : local()), local)
+    const { voices } = await response.json()
+    list.replaceChildren(...voices.map(card))
+  } catch {
+    list.innerHTML = '<li class="empty">Couldn’t load the voices. Try again in a moment.</li>'
+  }
+}
+
+main()
+</script>
+</body>
+</html>
