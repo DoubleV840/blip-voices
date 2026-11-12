@@ -140,6 +140,9 @@
 // from Blip's own repository.
 const RAW = 'https://raw.githubusercontent.com/DoubleV840'
 const CATALOG = `${RAW}/blip-voices/main/catalog.json`
+// The same catalog through GitHub's API: a minute old at most, where the raw
+// file can be five; sixty reads an hour per visitor, then the raw file.
+const API_CATALOG = 'https://api.github.com/repos/DoubleV840/blip-voices/contents/catalog.json'
 const REPORT = 'https://github.com/DoubleV840/blip-voices/issues/new?template=report-voice.yml'
 
 // Blip's typewriter, as the plugin plays it: 30 letters a second, pauses at
@@ -334,13 +337,29 @@ function filter(cards, query, theme) {
   document.getElementById('none').hidden = shown > 0
 }
 
+// The freshest catalog that answers: the API's, the raw file, this site's copy.
+async function loadCatalog() {
+  const attempts = [
+    () => fetch(API_CATALOG, { headers: { Accept: 'application/vnd.github.raw' }, cache: 'no-cache' }),
+    () => fetch(CATALOG, { cache: 'no-cache' }),
+    () => fetch('catalog.json', { cache: 'no-cache' }),
+  ]
+  for (const attempt of attempts) {
+    try {
+      const response = await attempt()
+      if (response.ok) return await response.json()
+    } catch {
+      // The next source, then.
+    }
+  }
+  throw new Error('no catalog answered')
+}
+
 async function main() {
   document.querySelectorAll('header .copy').forEach(copyButton)
   const list = document.getElementById('voices')
   try {
-    const local = () => fetch('catalog.json')
-    const response = await fetch(CATALOG).then(r => (r.ok ? r : local()), local)
-    const { voices, themes = [] } = await response.json()
+    const { voices, themes = [] } = await loadCatalog()
     const cards = voices.map(voice => ({ voice, item: card(voice) }))
     const none = document.createElement('li')
     none.className = 'empty'
