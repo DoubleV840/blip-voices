@@ -5,17 +5,20 @@ From an approved issue, in the GitHub workflow:
 
     python3 scripts/add_voice.py --from-issue
 
-reads ISSUE_BODY and ISSUE_AUTHOR from the environment, downloads the zip the
+reads ISSUE_BODY and ISSUE_AUTHOR from the environment, downloads the file the
 issue links to, and prints `name=<voice>` for the workflow's output.
 
 By hand:
 
-    python3 scripts/add_voice.py --name bloop --author you --description "a wet bloop" bloop.wav
+    python3 scripts/add_voice.py --name bloop --author you --description "a wet bloop" bloop.mp3
 
-The sound is checked and made uniform: mono, 16-bit, 22050 Hz, silence
+Any audio file works: a .wav is read as is, anything else (.mp3, .m4a, .ogg,
+.flac, .aiff, the sound of an .mp4 or .mov...) goes through ffmpeg first. The
+sound is checked and made uniform: mono, 16-bit, 22050 Hz, silence
 trimmed, at most 0.3 s, faded out, and about as loud as the built-in voices.
 It is written to voices/<name>/ (voice.wav for the site, voice.txt, its
-base64, for Blip) and catalog.json is rebuilt. Standard library only.
+base64, for Blip) and catalog.json is rebuilt. Standard library, and ffmpeg
+for what is not a .wav.
 """
 
 import argparse
@@ -26,8 +29,11 @@ import json
 import math
 import os
 import re
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 import urllib.request
 import wave
 import zipfile
@@ -45,8 +51,12 @@ TARGET_RMS = 0.12
 PEAK = 0.9
 MAX_DOWNLOAD = 2 * 1024 * 1024
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,19}$")
+AUDIO = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".aif", ".aiff", ".caf", ".webm", ".mp4", ".mov"}
+# A file attached to an issue (a zip...), or a video, whose link has no name.
 ATTACHMENT = re.compile(
-    r"https://github\.com/(?:user-attachments/files|[\w.-]+/[\w.-]+/files)/\d+/[^\s)\]]+"
+    r"https://github\.com/(?:user-attachments/files/\d+/[^\s)\]]+"
+    r"|user-attachments/assets/[0-9a-f-]{36}"
+    r"|[\w.-]+/[\w.-]+/files/\d+/[^\s)\]]+)"
 )
 
 # The voices Blip ships with (its hooks/voices.ts): listed first on the site.
@@ -86,18 +96,50 @@ def download(url):
     return data
 
 
-def wav_from(data, url):
-    """The WAV bytes in a download: the file itself, or the first .wav of a zip."""
+def audio_from(data, url):
+    """The audio in a download and its extension: the file itself, or the first
+    audio file of a zip."""
+    name = url.rsplit("/", 1)[-1].lower()
+    if zipfile.is_zipfile(io.BytesIO(data)):
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            for member in archive.infolist():
+                extension = Path(member.filename).suffix.lower()
+                if extension in AUDIO and "__MACOSX" not in member.filename and member.file_size <= MAX_DOWNLOAD:
+                    return archive.read(member), extension
+        raise Refused("the zip holds no audio file under 2 MB")
+    if Path(name).suffix in AUDIO:
+        return data, Path(name).suffix
+    if "/user-attachments/assets/" in url:
+        return data, ".mp4"
+    raise Refused(f"{name} is neither a zip nor an audio file")
+
+
+def converted(data, extension):
+    """Any audio as a mono 16-bit WAV at RATE, through ffmpeg: its first 2 s."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise Refused("this file needs ffmpeg to be read, and it is not installed: send a .wav")
+    with tempfile.TemporaryDirectory() as folder:
+        source = Path(folder) / f"sound{extension}"
+        target = Path(folder) / "sound.wav"
+        source.write_bytes(data)
+        command = [ffmpeg, "-nostdin", "-v", "error", "-i", str(source), "-t", "2", "-vn",
+                   "-ac", "1", "-ar", str(RATE), "-c:a", "pcm_s16le", str(target)]
+        run = subprocess.run(command, capture_output=True, timeout=60)
+        if run.returncode != 0 or not target.exists():
+            raise Refused("the sound could not be read: is it really an audio file?")
+        return target.read_bytes()
+
+
+def decoded(data, extension):
+    """Mono samples and their rate, from a .wav as is, or from any audio."""
     if data[:4] == b"RIFF":
-        return data
-    if not zipfile.is_zipfile(io.BytesIO(data)):
-        raise Refused(f"{url.rsplit('/', 1)[-1]} is neither a zip nor a .wav")
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        for member in archive.infolist():
-            name = member.filename
-            if name.lower().endswith(".wav") and "__MACOSX" not in name and member.file_size <= MAX_DOWNLOAD:
-                return archive.read(member)
-    raise Refused("the zip holds no .wav file under 2 MB")
+        try:
+            return samples_of(data)
+        except Refused:
+            if shutil.which("ffmpeg") is None:
+                raise
+    return samples_of(converted(data, extension))
 
 
 def samples_of(data):
@@ -164,7 +206,7 @@ def wav_bytes(samples):
     return out.getvalue()
 
 
-def add(name, author, description, data):
+def add(name, author, description, data, extension=".wav"):
     name = name.strip().lower()
     description = " ".join(description.split())
     if not NAME.match(name):
@@ -174,7 +216,7 @@ def add(name, author, description, data):
     if not 1 <= len(description) <= 60:
         raise Refused("the description takes 1 to 60 characters")
 
-    wav = wav_bytes(uniform(*samples_of(data)))
+    wav = wav_bytes(uniform(*decoded(data, extension)))
     folder = VOICES / name
     folder.mkdir(parents=True)
     (folder / "voice.wav").write_bytes(wav)
@@ -210,9 +252,9 @@ def from_issue():
     sound = fields.get("sound", "")
     url = ATTACHMENT.search(sound)
     if url is None:
-        raise Refused("no zip attached: drag your zipped .wav into the Sound field")
-    data = wav_from(download(url.group(0)), url.group(0))
-    return add(fields.get("voice name", ""), author, fields.get("description", ""), data)
+        raise Refused("no file attached: drag your zipped sound into the Sound field")
+    data, extension = audio_from(download(url.group(0)), url.group(0))
+    return add(fields.get("voice name", ""), author, fields.get("description", ""), data, extension)
 
 
 def main():
@@ -233,8 +275,8 @@ def main():
             name = from_issue()
         else:
             if not (args.name and args.author and args.description and args.file):
-                parser.error("give --name, --author, --description and a .wav file, or --from-issue")
-            name = add(args.name, args.author, args.description, args.file.read_bytes())
+                parser.error("give --name, --author, --description and a sound file, or --from-issue")
+            name = add(args.name, args.author, args.description, args.file.read_bytes(), args.file.suffix.lower())
     except Refused as refused:
         message = str(refused)
         if os.environ.get("ERROR_FILE"):
