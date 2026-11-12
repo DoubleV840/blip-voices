@@ -298,8 +298,10 @@ def prepared(name, theme, description, data, extension, title="", check_sound=Tr
     check_words(name, description, title)
     if not NAME.match(name):
         raise Refused("the name takes 2 to 20 letters, digits or dashes, like cat-meow")
-    if name in RESERVED or (VOICES / name).exists() or name in removed():
+    if name in RESERVED or (VOICES / name).exists():
         raise Refused(f"there is already a voice named {name}: pick another name")
+    if name in removed():
+        raise Refused(f"the name {name} belonged to a voice that was removed, and stays taken: pick another name")
     if theme not in THEMES:
         raise Refused(f"the theme is one of {', '.join(THEMES)}")
     if not 1 <= len(description) <= 60:

@@ -55,7 +55,7 @@ jobs:
             [ -d "voices/$NAME" ] || break  # already removed
             python3 scripts/add_voice.py --remove "$NAME"
             git add -A voices catalog.json removed.json
-            git commit -q -m "Remove voice $NAME, reported"
+            git commit -q -m "Remove voice $NAME (#$ISSUE)"
             git push -q "$remote" HEAD:main && break
             sleep $((attempt * 3))
           done
