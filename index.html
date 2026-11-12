@@ -42,6 +42,20 @@
   .copy code { overflow-wrap: anywhere; }
   .copy span { color: var(--muted); font-size: 13px; flex: none; }
   .copy:hover { border-color: var(--accent); }
+  .filters { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .search {
+    width: 100%; max-width: 420px; padding: 10px 14px; border-radius: 6px;
+    background: var(--card); border: 2px solid var(--line); color: var(--text); font: inherit;
+  }
+  .search::placeholder { color: var(--muted); }
+  .search:focus { outline: none; border-color: var(--accent); }
+  .themes { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .theme {
+    background: transparent; border: 2px solid var(--line); border-radius: 999px;
+    padding: 4px 12px; font-size: 14px; color: var(--muted);
+  }
+  .theme:hover { border-color: var(--accent); color: var(--text); }
+  .theme[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--ink); }
   .grid {
     list-style: none; margin: 0; padding: 0;
     display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -64,6 +78,7 @@
     background: var(--accent); color: var(--ink); font-size: 14px;
   }
   .empty { color: var(--muted); text-align: center; grid-column: 1 / -1; }
+  .report { align-self: flex-end; font-size: 12px; color: var(--muted); }
   .share { text-align: center; padding: 56px 0 24px; }
   h2 { font: 16px/1.5 var(--pixel); margin: 0 0 12px; }
   .share p { color: var(--muted); margin: 0 0 20px; }
@@ -87,6 +102,10 @@
 </header>
 
 <main>
+  <div class="filters">
+    <input class="search" id="search" type="search" placeholder="Search a voice" aria-label="Search a voice">
+    <div class="themes" id="themes" role="group" aria-label="Themes"></div>
+  </div>
   <ul class="grid" id="voices"><li class="empty">Loading the voices…</li></ul>
 
   <section class="share">
@@ -106,6 +125,7 @@
 // from Blip's own repository.
 const RAW = 'https://raw.githubusercontent.com/DoubleV840'
 const CATALOG = `${RAW}/blip-voices/main/catalog.json`
+const REPORT = 'https://github.com/DoubleV840/blip-voices/issues/new?template=report-voice.yml'
 
 // Blip's typewriter, as the plugin plays it: 30 letters a second, pauses at
 // commas and sentence ends, a blip on a letter at most every 45 ms, each cut
@@ -220,7 +240,7 @@ function card(voice) {
       <button class="copy"><code></code></button>
     </div>`
   item.querySelector('h3').textContent = voice.name
-  item.querySelector('.tag').textContent = voice.official ? 'built in' : `by ${voice.author}`
+  item.querySelector('.tag').textContent = voice.official ? `${voice.theme} · built in` : `${voice.theme} · by ${voice.author}`
   const desc = item.querySelector('.desc')
   desc.textContent = voice.description
   const command = `/blip voice ${voice.name}`
@@ -228,6 +248,14 @@ function card(voice) {
   copy.dataset.copy = command
   copy.querySelector('code').textContent = command
   copyButton(copy)
+
+  if (!voice.official) {
+    const report = document.createElement('a')
+    report.className = 'report'
+    report.href = `${REPORT}&title=${encodeURIComponent(`Report: ${voice.name}`)}&voice=${encodeURIComponent(voice.name)}`
+    report.textContent = 'report'
+    item.append(report)
+  }
 
   const play = item.querySelector('.play')
   play.setAttribute('aria-label', `Listen to ${voice.name}`)
@@ -247,14 +275,50 @@ function card(voice) {
   return item
 }
 
+// Shows the cards whose theme is picked and whose words hold the search.
+function filter(cards, query, theme) {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  let shown = 0
+  for (const { voice, item } of cards) {
+    const text = `${voice.name} ${voice.description} ${voice.author} ${voice.theme}`.toLowerCase()
+    const isShown = (theme === 'all' || voice.theme === theme) && words.every(word => text.includes(word))
+    item.hidden = !isShown
+    if (isShown) shown++
+  }
+  document.getElementById('none').hidden = shown > 0
+}
+
 async function main() {
   document.querySelectorAll('header .copy').forEach(copyButton)
   const list = document.getElementById('voices')
   try {
     const local = () => fetch('catalog.json')
     const response = await fetch(CATALOG).then(r => (r.ok ? r : local()), local)
-    const { voices } = await response.json()
-    list.replaceChildren(...voices.map(card))
+    const { voices, themes = [] } = await response.json()
+    const cards = voices.map(voice => ({ voice, item: card(voice) }))
+    const none = document.createElement('li')
+    none.className = 'empty'
+    none.id = 'none'
+    none.textContent = 'No voice matches.'
+    none.hidden = true
+    list.replaceChildren(...cards.map(c => c.item), none)
+
+    const search = document.getElementById('search')
+    let theme = 'all'
+    const chips = ['all', ...themes].map(name => {
+      const chip = document.createElement('button')
+      chip.className = 'theme'
+      chip.textContent = name
+      chip.setAttribute('aria-pressed', String(name === theme))
+      chip.addEventListener('click', () => {
+        theme = name
+        chips.forEach(c => c.setAttribute('aria-pressed', String(c === chip)))
+        filter(cards, search.value, theme)
+      })
+      return chip
+    })
+    document.getElementById('themes').replaceChildren(...chips)
+    search.addEventListener('input', () => filter(cards, search.value, theme))
   } catch {
     list.innerHTML = '<li class="empty">Couldn’t load the voices. Try again in a moment.</li>'
   }

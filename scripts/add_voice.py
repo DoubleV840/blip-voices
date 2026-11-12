@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
-"""Adds a community voice to the catalog.
+"""Checks, adds and removes community voices.
 
-From an approved issue, in the GitHub workflow:
+In the GitHub workflows:
 
-    python3 scripts/add_voice.py --from-issue
+    python3 scripts/add_voice.py --check-issue   # a new submission: is it fit for review?
+    python3 scripts/add_voice.py --from-issue    # an approved one: add it
 
-reads ISSUE_BODY and ISSUE_AUTHOR from the environment, downloads the file the
-issue links to, and prints `name=<voice>` for the workflow's output.
+both read ISSUE_TITLE, ISSUE_BODY and ISSUE_AUTHOR from the environment and
+print `key=value` lines for the workflow's outputs (status, name, reason).
 
 By hand:
 
-    python3 scripts/add_voice.py --name bloop --author you --description "a wet bloop" bloop.mp3
+    python3 scripts/add_voice.py --name bloop --author you --theme cute --description "a wet bloop" bloop.mp3
+    python3 scripts/add_voice.py --remove bloop
 
-Any audio file works: a .wav is read as is, anything else (.mp3, .m4a, .ogg,
-.flac, .aiff, the sound of an .mp4 or .mov...) goes through ffmpeg first. The
-sound is checked and made uniform: mono, 16-bit, 22050 Hz, silence
-trimmed, at most 0.3 s, faded out, and about as loud as the built-in voices.
-It is written to voices/<name>/ (voice.wav for the site, voice.txt, its
-base64, for Blip) and catalog.json is rebuilt. Standard library, and ffmpeg
-for what is not a .wav.
+A voice is a sound, never a video. Any audio file works: a .wav is read as is,
+anything else (.mp3, .m4a, .ogg, .flac, .aiff...) goes through ffmpeg first.
+The sound is made uniform: mono, 16-bit, 22050 Hz, silence trimmed, at most
+0.3 s, faded out, and about as loud as the built-in voices. It is written to
+voices/<name>/ (voice.wav for the site, voice.txt, its base64, for Blip) and
+catalog.json is rebuilt. A removed voice is listed in removed.json, and Blip
+deletes it from the machines that installed it.
+
+Names, descriptions and titles are checked against blocklist.txt and the
+English and French lists of the LDNOOBW project.
 """
 
 import argparse
@@ -34,6 +39,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import urllib.request
 import wave
 import zipfile
@@ -42,6 +48,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 VOICES = ROOT / "voices"
 CATALOG = ROOT / "catalog.json"
+REMOVED = ROOT / "removed.json"
+BLOCKLIST = Path(__file__).resolve().parent / "blocklist.txt"
+SHARED_BLOCKLISTS = [
+    "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/en",
+    "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/fr",
+]
 
 RATE = 22050
 MAX_SECONDS = 0.3
@@ -51,31 +63,83 @@ TARGET_RMS = 0.12
 PEAK = 0.9
 MAX_DOWNLOAD = 2 * 1024 * 1024
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,19}$")
-AUDIO = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".aif", ".aiff", ".caf", ".webm", ".mp4", ".mov"}
-# A file attached to an issue (a zip...), or a video, whose link has no name.
-ATTACHMENT = re.compile(
-    r"https://github\.com/(?:user-attachments/files/\d+/[^\s)\]]+"
-    r"|user-attachments/assets/[0-9a-f-]{36}"
-    r"|[\w.-]+/[\w.-]+/files/\d+/[^\s)\]]+)"
-)
+AUDIO = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".aif", ".aiff", ".caf"}
+# A file attached to an issue: GitHub takes audio zipped.
+ATTACHMENT = re.compile(r"https://github\.com/(?:user-attachments/files|[\w.-]+/[\w.-]+/files)/\d+/[^\s)\]]+")
+
+THEMES = ["retro", "cute", "soft", "machine", "creature", "dark", "weird"]
 
 # The voices Blip ships with (its hooks/voices.ts): listed first on the site.
 OFFICIAL = [
-    ("classic", "square-wave blip, the classic RPG text box", 1, 5, False),
-    ("nes", "thin 8-bit pulse, like an old cartridge", 1, 5, False),
-    ("soft", "gentle sine, easy on the ears", 1, 4, False),
-    ("bubble", "little rising pops", 1, 6, False),
-    ("typewriter", "mechanical keys clacking", 3, 1, False),
-    ("robot", "metallic, ring-modulated", 1, 3, False),
-    ("deep", "low and ominous, boss-fight energy", 1, 3, False),
-    ("chirp", "tiny bird chirps", 1, 7, False),
-    ("critter", "a babbling little creature (vowel sounds)", 5, 5, True),
+    ("classic", "square-wave blip, the classic RPG text box", "retro", 1, 5, False),
+    ("nes", "thin 8-bit pulse, like an old cartridge", "retro", 1, 5, False),
+    ("soft", "gentle sine, easy on the ears", "soft", 1, 4, False),
+    ("bubble", "little rising pops", "cute", 1, 6, False),
+    ("typewriter", "mechanical keys clacking", "machine", 3, 1, False),
+    ("robot", "metallic, ring-modulated", "machine", 1, 3, False),
+    ("deep", "low and ominous, boss-fight energy", "dark", 1, 3, False),
+    ("chirp", "tiny bird chirps", "creature", 1, 7, False),
+    ("critter", "a babbling little creature (vowel sounds)", "creature", 5, 5, True),
 ]
 RESERVED = {name for name, *_ in OFFICIAL} | {"custom", "on", "off"}
 
 
 class Refused(Exception):
     """A submission that cannot be added, with the reason to tell its author."""
+
+
+class Offensive(Refused):
+    """A submission whose words are not allowed: removed, not just refused."""
+
+
+# ---- Words -----------------------------------------------------------------
+
+LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "!": "i"})
+
+
+def plain_words(text):
+    """Lowercase words, accents and leetspeak undone."""
+    plain = unicodedata.normalize("NFKD", (text or "").lower().translate(LEET))
+    plain = "".join(c for c in plain if not unicodedata.combining(c))
+    return re.findall(r"[a-z]+", plain)
+
+
+_blocked = None
+
+
+def blocked_terms():
+    """The blocked words and phrases, each as its plain words joined by spaces."""
+    global _blocked
+    if _blocked is None:
+        lines = BLOCKLIST.read_text().splitlines() if BLOCKLIST.exists() else []
+        for url in SHARED_BLOCKLISTS:
+            try:
+                with urllib.request.urlopen(url, timeout=15) as response:
+                    lines += response.read().decode("utf-8", "replace").splitlines()
+            except OSError:
+                pass  # The local list still applies.
+        terms = {" ".join(plain_words(line)) for line in lines if line.strip() and not line.startswith("#")}
+        _blocked = {t for t in terms if len(t) >= 3}
+    return _blocked
+
+
+def check_words(*texts):
+    """Raises Offensive when a text holds a blocked word or phrase, spelled
+    plainly, with a letter held (fuuun), or spread with dashes (f-u-n)."""
+    terms = blocked_terms()
+    for text in texts:
+        words = plain_words(text)
+        held = [re.sub(r"(.)\1+", r"\1", w) for w in words]
+        squashed = "".join(words)
+        for spelled in (words, held):
+            joined = f" {' '.join(spelled)} "
+            if any(f" {term} " in joined for term in terms):
+                raise Offensive("its name, title or description holds a word that isn't allowed")
+        if len(squashed) >= 4 and squashed in terms:
+            raise Offensive("its name, title or description holds a word that isn't allowed")
+
+
+# ---- Sound -----------------------------------------------------------------
 
 
 def fields_of(body):
@@ -97,8 +161,8 @@ def download(url):
 
 
 def audio_from(data, url):
-    """The audio in a download and its extension: the file itself, or the first
-    audio file of a zip."""
+    """The audio in a download and its extension: the first sound file of a
+    zip, or the file itself."""
     name = url.rsplit("/", 1)[-1].lower()
     if zipfile.is_zipfile(io.BytesIO(data)):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -106,16 +170,24 @@ def audio_from(data, url):
                 extension = Path(member.filename).suffix.lower()
                 if extension in AUDIO and "__MACOSX" not in member.filename and member.file_size <= MAX_DOWNLOAD:
                     return archive.read(member), extension
-        raise Refused("the zip holds no audio file under 2 MB")
+        raise Refused("the zip holds no sound file (.wav, .mp3, .m4a, .ogg, .flac...) under 2 MB")
     if Path(name).suffix in AUDIO:
         return data, Path(name).suffix
-    if "/user-attachments/assets/" in url:
-        return data, ".mp4"
-    raise Refused(f"{name} is neither a zip nor an audio file")
+    raise Refused(f"{name} is not a zipped sound file")
+
+
+def has_video(path):
+    """Whether a file holds moving pictures; an mp3's cover art is fine."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        return False
+    run = subprocess.run([ffprobe, "-v", "error", "-show_streams", "-of", "json", str(path)], capture_output=True, timeout=30)
+    streams = json.loads(run.stdout or b"{}").get("streams", [])
+    return any(s.get("codec_type") == "video" and not s.get("disposition", {}).get("attached_pic") for s in streams)
 
 
 def converted(data, extension):
-    """Any audio as a mono 16-bit WAV at RATE, through ffmpeg: its first 2 s."""
+    """Any sound as a mono 16-bit WAV at RATE, through ffmpeg: its first 2 s."""
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         raise Refused("this file needs ffmpeg to be read, and it is not installed: send a .wav")
@@ -123,23 +195,14 @@ def converted(data, extension):
         source = Path(folder) / f"sound{extension}"
         target = Path(folder) / "sound.wav"
         source.write_bytes(data)
+        if has_video(source):
+            raise Refused("this file holds a video: send a sound only")
         command = [ffmpeg, "-nostdin", "-v", "error", "-i", str(source), "-t", "2", "-vn",
                    "-ac", "1", "-ar", str(RATE), "-c:a", "pcm_s16le", str(target)]
         run = subprocess.run(command, capture_output=True, timeout=60)
         if run.returncode != 0 or not target.exists():
-            raise Refused("the sound could not be read: is it really an audio file?")
+            raise Refused("the sound could not be read: is it really a sound file?")
         return target.read_bytes()
-
-
-def decoded(data, extension):
-    """Mono samples and their rate, from a .wav as is, or from any audio."""
-    if data[:4] == b"RIFF":
-        try:
-            return samples_of(data)
-        except Refused:
-            if shutil.which("ffmpeg") is None:
-                raise
-    return samples_of(converted(data, extension))
 
 
 def samples_of(data):
@@ -164,6 +227,17 @@ def samples_of(data):
 
     mono = [sum(values[i : i + channels]) / channels for i in range(0, len(values), channels)]
     return mono, rate
+
+
+def decoded(data, extension):
+    """Mono samples and their rate, from a .wav as is, or from any sound file."""
+    if data[:4] == b"RIFF":
+        try:
+            return samples_of(data)
+        except Refused:
+            if shutil.which("ffmpeg") is None:
+                raise
+    return samples_of(converted(data, extension))
 
 
 def uniform(samples, rate):
@@ -206,17 +280,28 @@ def wav_bytes(samples):
     return out.getvalue()
 
 
-def add(name, author, description, data, extension=".wav"):
+# ---- The catalog -----------------------------------------------------------
+
+
+def prepared(name, theme, description, data, extension, title=""):
+    """A submission checked and its sound made uniform, nothing written yet."""
     name = name.strip().lower()
+    theme = theme.strip().lower()
     description = " ".join(description.split())
+    check_words(name, description, title)
     if not NAME.match(name):
         raise Refused("the name takes 2 to 20 lowercase letters, digits or dashes")
-    if name in RESERVED or (VOICES / name).exists():
+    if name in RESERVED or (VOICES / name).exists() or name in removed():
         raise Refused(f"there is already a voice named {name}: pick another name")
+    if theme not in THEMES:
+        raise Refused(f"the theme is one of {', '.join(THEMES)}")
     if not 1 <= len(description) <= 60:
         raise Refused("the description takes 1 to 60 characters")
+    return name, theme, description, wav_bytes(uniform(*decoded(data, extension)))
 
-    wav = wav_bytes(uniform(*decoded(data, extension)))
+
+def add(name, author, theme, description, data, extension=".wav"):
+    name, theme, description, wav = prepared(name, theme, description, data, extension)
     folder = VOICES / name
     folder.mkdir(parents=True)
     (folder / "voice.wav").write_bytes(wav)
@@ -224,6 +309,7 @@ def add(name, author, description, data, extension=".wav"):
     meta = {
         "name": name,
         "author": author,
+        "theme": theme,
         "description": description,
         "license": "CC0-1.0",
         "added": datetime.date.today().isoformat(),
@@ -233,58 +319,93 @@ def add(name, author, description, data, extension=".wav"):
     return name
 
 
+def removed():
+    return json.loads(REMOVED.read_text()) if REMOVED.exists() else []
+
+
+def remove(name):
+    folder = VOICES / name
+    if not folder.is_dir():
+        raise Refused(f"there is no community voice named {name}")
+    shutil.rmtree(folder)
+    REMOVED.write_text(json.dumps(sorted({*removed(), name}), indent=2) + "\n")
+    build_catalog()
+
+
 def build_catalog():
     official = [
-        {"name": n, "author": "blip", "description": d, "official": True, "variants": v, "spread": s, "vowels": vw}
-        for n, d, v, s, vw in OFFICIAL
+        {"name": n, "author": "blip", "theme": t, "description": d, "official": True, "variants": v, "spread": s, "vowels": vw}
+        for n, d, t, v, s, vw in OFFICIAL
     ]
     community = sorted(
         (json.loads(p.read_text()) for p in VOICES.glob("*/voice.json")),
         key=lambda v: (v.get("added", ""), v["name"]),
         reverse=True,
     )
-    CATALOG.write_text(json.dumps({"voices": official + community}, indent=2, ensure_ascii=False) + "\n")
+    catalog = {"themes": THEMES, "voices": official + community, "removed": removed()}
+    CATALOG.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n")
 
 
-def from_issue():
+# ---- Issues ----------------------------------------------------------------
+
+
+def submission():
+    """The submission an issue holds: its title, its fields, and its sound."""
+    title = os.environ.get("ISSUE_TITLE", "")
     fields = fields_of(os.environ.get("ISSUE_BODY", ""))
-    author = os.environ.get("ISSUE_AUTHOR", "").strip()
-    sound = fields.get("sound", "")
-    url = ATTACHMENT.search(sound)
+    check_words(title, fields.get("voice name", ""), fields.get("description", ""))
+    url = ATTACHMENT.search(fields.get("sound", ""))
     if url is None:
-        raise Refused("no file attached: drag your zipped sound into the Sound field")
+        raise Refused("no zip attached: zip your sound file and drag the zip into the Sound field")
     data, extension = audio_from(download(url.group(0)), url.group(0))
-    return add(fields.get("voice name", ""), author, fields.get("description", ""), data, extension)
+    return title, fields, data, extension
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--from-issue", action="store_true", help="read the approved issue from the environment")
+    parser.add_argument("--check-issue", action="store_true", help="check the submission in the environment")
+    parser.add_argument("--from-issue", action="store_true", help="add the approved submission in the environment")
+    parser.add_argument("--remove", metavar="NAME", help="remove a community voice")
+    parser.add_argument("--catalog-only", action="store_true", help="only rebuild catalog.json")
     parser.add_argument("--name")
     parser.add_argument("--author")
+    parser.add_argument("--theme")
     parser.add_argument("--description")
-    parser.add_argument("--catalog-only", action="store_true", help="only rebuild catalog.json")
     parser.add_argument("file", nargs="?", type=Path)
     args = parser.parse_args()
 
     try:
         if args.catalog_only:
             build_catalog()
-            return
-        if args.from_issue:
-            name = from_issue()
+        elif args.remove:
+            remove(args.remove)
+            print(f"name={args.remove}")
+        elif args.check_issue:
+            title, fields, data, extension = submission()
+            name, theme, _, wav = prepared(
+                fields.get("voice name", ""), fields.get("theme", ""), fields.get("description", ""), data, extension, title
+            )
+            print(f"status=ok\nname={name}\ntheme={theme}\nseconds={(len(wav) - 44) / 2 / RATE:.2f}")
+        elif args.from_issue:
+            _, fields, data, extension = submission()
+            author = os.environ.get("ISSUE_AUTHOR", "").strip()
+            name = add(fields.get("voice name", ""), author, fields.get("theme", ""), fields.get("description", ""), data, extension)
+            print(f"status=ok\nname={name}")
         else:
-            if not (args.name and args.author and args.description and args.file):
-                parser.error("give --name, --author, --description and a sound file, or --from-issue")
-            name = add(args.name, args.author, args.description, args.file.read_bytes(), args.file.suffix.lower())
+            if not (args.name and args.author and args.theme and args.description and args.file):
+                parser.error("give --name, --author, --theme, --description and a sound file")
+            name = add(args.name, args.author, args.theme, args.description, args.file.read_bytes(), args.file.suffix.lower())
+            print(f"name={name}")
     except Refused as refused:
-        message = str(refused)
+        # Checking, a refusal is an answer for the workflow, not a failure.
+        if args.check_issue:
+            status = "offensive" if isinstance(refused, Offensive) else "invalid"
+            print(f"status={status}\nreason={refused}")
+            return
         if os.environ.get("ERROR_FILE"):
-            Path(os.environ["ERROR_FILE"]).write_text(message + "\n")
-        print(f"refused: {message}", file=sys.stderr)
+            Path(os.environ["ERROR_FILE"]).write_text(f"{refused}\n")
+        print(f"refused: {refused}", file=sys.stderr)
         sys.exit(1)
-
-    print(f"name={name}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+# Words and phrases a voice's name, title or description may not hold, one
+# per line, on top of the English and French lists of the LDNOOBW project.
+# Case, accents, leetspeak (sh1t), held letters (shiiit) and dashes (s-h-i-t)
+# are all caught.
+nazi
+nazis
+hitler
+heil
+kkk
+swastika

@@ -1,0 +1,27 @@
+name: Report a voice
+description: A voice that shouldn't be there
+title: "Report: "
+labels: ["report"]
+body:
+  - type: input
+    id: voice
+    attributes:
+      label: Voice
+      description: Its name, as in `/blip voice <name>`.
+    validations:
+      required: true
+  - type: dropdown
+    id: reason
+    attributes:
+      label: Why
+      options:
+        - It's offensive
+        - It's taken from a game, a film, a show or a song
+        - It's broken or far too loud
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Anything to add

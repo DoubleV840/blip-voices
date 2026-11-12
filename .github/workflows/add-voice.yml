@@ -35,6 +35,7 @@ jobs:
       - name: Check and convert the sound
         id: add
         env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
           ERROR_FILE: ${{ runner.temp }}/error.txt

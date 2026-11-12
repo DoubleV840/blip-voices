@@ -1,0 +1,87 @@
+# Checks every submission as soon as it is posted or edited: its words, its
+# file, its sound. A fit one waits for a maintainer to listen and approve it;
+# an unfit one is told what to fix; an offensive one is wiped, closed and
+# locked; past three open submissions, a person's next ones are closed.
+name: Check a voice
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    if: github.event.issue.state == 'open' && contains(github.event.issue.body, '### Sound')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      # No credentials while the submitted file is handled.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg
+        run: command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
+
+      # The issue's text goes in through the environment, never into a command.
+      - name: Check the submission
+        id: check
+        env:
+          GH_TOKEN: ""
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: python3 scripts/add_voice.py --check-issue >> "$GITHUB_OUTPUT"
+
+      - name: Count the author's open submissions
+        id: flood
+        env:
+          AUTHOR: ${{ github.event.issue.user.login }}
+          ASSOCIATION: ${{ github.event.issue.author_association }}
+        run: |
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --author "$AUTHOR" --state open --limit 100 --json title \
+            --jq '[.[] | select(.title | startswith("Voice:"))] | length')
+          case "$ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR) echo "flooded=false" ;;
+            *) if [ "$open" -gt 3 ]; then echo "flooded=true"; else echo "flooded=false"; fi ;;
+          esac >> "$GITHUB_OUTPUT"
+
+      - name: Remove an offensive submission
+        if: steps.check.outputs.status == 'offensive'
+        run: |
+          gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --title "Voice: removed" \
+            --body "Removed automatically: this submission held a word that isn't allowed. If that's a mistake, submit again with other words."
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason "not planned"
+          gh issue lock "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason spam
+
+      - name: Close one too many
+        if: steps.check.outputs.status != 'offensive' && steps.flood.outputs.flooded == 'true'
+        run: |
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason "not planned" \
+            --comment "Three submissions at a time at most: this one is welcome again once the others are reviewed."
+
+      - name: Say what to fix
+        if: steps.check.outputs.status == 'invalid' && steps.flood.outputs.flooded == 'false'
+        env:
+          REASON: ${{ steps.check.outputs.reason }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" \
+            --body "This voice can't be added yet: $REASON. Edit the issue to fix it, and it is checked again."
+
+      - name: Ready for review
+        if: steps.check.outputs.status == 'ok' && steps.flood.outputs.flooded == 'false'
+        env:
+          NAME: ${{ steps.check.outputs.name }}
+          THEME: ${{ steps.check.outputs.theme }}
+          SECONDS: ${{ steps.check.outputs.seconds }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" \
+            --body "Checked: \`$NAME\`, $THEME, $SECONDS s once trimmed. A maintainer will listen to it, then approve it."

@@ -7,13 +7,28 @@ body:
     attributes:
       value: |
         One short sound, under half a second: Blip plays it on every letter and changes its pitch itself.
-        Any audio file works (`.wav`, `.mp3`, `.m4a`, `.ogg`, `.flac`…): zip it and drop the zip in the **Sound** field. A short `.mp4` or `.mov` works too, as is. Once approved, your voice shows on [blip.ivwi.fr](https://blip.ivwi.fr) and in everyone's `/blip voice` menu.
+        Sounds only, no videos: `.wav`, `.mp3`, `.m4a`, `.ogg`, `.flac`… Zip the file and drop the zip in the **Sound** field.
+        It is checked automatically, then a maintainer listens to it. Once approved, it shows on [blip.ivwi.fr](https://blip.ivwi.fr) and in everyone's `/blip voice` menu.
   - type: input
     id: name
     attributes:
       label: Voice name
       description: 2 to 20 lowercase letters, digits or dashes. People will type `/blip voice <name>`.
       placeholder: bloop
+    validations:
+      required: true
+  - type: dropdown
+    id: theme
+    attributes:
+      label: Theme
+      options:
+        - retro
+        - cute
+        - soft
+        - machine
+        - creature
+        - dark
+        - weird
     validations:
       required: true
   - type: input
@@ -28,7 +43,7 @@ body:
     id: sound
     attributes:
       label: Sound
-      description: Drag your zipped sound here (or a short `.mp4` / `.mov`).
+      description: Drag your zipped sound file here.
     validations:
       required: true
   - type: checkboxes
@@ -39,4 +54,6 @@ body:
         - label: I made this sound myself, or it is in the public domain, and I share it under CC0.
           required: true
         - label: It is not taken from a game, a film, a show or a song.
+          required: true
+        - label: Nothing in it, its name or its description is offensive.
           required: true
