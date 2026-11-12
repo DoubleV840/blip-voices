@@ -1,6 +1,7 @@
 # Handles a report: a community voice is removed once three different people
 # have reported it (accounts at least a week old), or at once when a
-# maintainer does. Removed, it leaves the site, the menus, and every machine
+# maintainer does; at once too when whoever shared it asks, with the "Remove
+# my voice" form. Removed, it leaves the site, the menus, and every machine
 # that installed it.
 name: Handle a report
 
@@ -14,7 +15,9 @@ permissions:
 
 jobs:
   report:
-    if: contains(github.event.issue.body, '### Voice') && contains(github.event.issue.body, '### Why')
+    if: >-
+      contains(github.event.issue.body, '### Voice to remove') ||
+      (contains(github.event.issue.body, '### Voice') && contains(github.event.issue.body, '### Why'))
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -69,6 +72,14 @@ jobs:
         run: |
           gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" \
             --body "Thanks, noted: \`$NAME\` has $COUNT of 3 reports. At 3, from different people with accounts at least a week old, it is removed automatically."
+
+      - name: Not theirs to remove
+        if: steps.count.outputs.action == 'refuse'
+        env:
+          NAME: ${{ steps.count.outputs.name }}
+        run: |
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason "not planned" \
+            --comment "Only the account that shared \`$NAME\` can remove it. If something is wrong with it, report it instead: https://github.com/DoubleV840/blip-voices/issues/new?template=report-voice.yml"
 
       - name: No such voice
         if: steps.count.outputs.action == 'ignore'

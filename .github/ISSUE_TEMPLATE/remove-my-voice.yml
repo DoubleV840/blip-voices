@@ -1,0 +1,16 @@
+name: Remove my voice
+description: Take down a voice you shared. It leaves the site and every Blip that installed it.
+title: "Remove: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Only the GitHub account that shared the voice can remove it. It goes within a minute: from [blip.ivwi.fr](https://blip.ivwi.fr), from the `/blip voice` menus and from every Blip that installed it.
+        Its name stays taken afterwards: to share a new version, pick another name.
+  - type: input
+    id: voice
+    attributes:
+      label: Voice to remove
+      description: Its name, as in `/blip voice <name>`.
+    validations:
+      required: true
