@@ -55,8 +55,9 @@
   .toast.shown { opacity: 1; transform: translate(-50%, 0); }
   .toast code { font-size: 13px; }
   .filters { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .bar { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; width: 100%; }
   .search {
-    width: 100%; max-width: 420px; padding: 10px 14px; border-radius: 6px;
+    flex: 1 1 260px; max-width: 420px; padding: 10px 14px; border-radius: 6px;
     background: var(--card); border: 2px solid var(--line); color: var(--text); font: inherit;
   }
   .search::placeholder { color: var(--muted); }
@@ -68,6 +69,10 @@
   }
   .theme:hover { border-color: var(--accent); color: var(--text); }
   .theme[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--ink); }
+  .sort { display: inline-flex; border: 2px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .sort button { background: transparent; border: 0; padding: 6px 14px; font-size: 14px; color: var(--muted); }
+  .sort button:hover { color: var(--text); }
+  .sort button[aria-pressed="true"] { background: var(--line); color: var(--text); }
   .grid {
     list-style: none; margin: 0; padding: 0;
     display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -77,9 +82,17 @@
     padding: 16px; display: flex; flex-direction: column; gap: 8px;
   }
   .card.playing { border-color: var(--accent); }
-  .top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   h3 { font: 13px/1.6 var(--pixel); margin: 0; overflow-wrap: anywhere; }
-  .tag { font-size: 12px; color: var(--muted); }
+  .tag { font-size: 12px; color: var(--muted); margin-top: -6px; }
+  .like {
+    flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 32px;
+    padding: 0 8px; margin-right: -8px; border: 0; border-radius: 6px;
+    background: transparent; color: var(--muted); font-size: 14px;
+  }
+  .like:hover { color: var(--text); }
+  .like[aria-pressed="true"] { color: var(--accent); }
+  .like:disabled { cursor: progress; }
   .desc { margin: 0; color: var(--muted); min-height: 3em; }
   .playing .desc { color: var(--text); }
   .actions { display: flex; gap: 8px; align-items: center; margin-top: auto; }
@@ -115,7 +128,13 @@
 
 <main>
   <div class="filters">
-    <input class="search" id="search" type="search" placeholder="Search a voice" aria-label="Search a voice">
+    <div class="bar">
+      <input class="search" id="search" type="search" placeholder="Search a voice" aria-label="Search a voice">
+      <div class="sort" id="sort" role="group" aria-label="Sort the voices" hidden>
+        <button data-sort="popular" aria-pressed="true">♥ Popular</button>
+        <button data-sort="new" aria-pressed="false">New</button>
+      </div>
+    </div>
     <div class="themes" id="themes" role="group" aria-label="Themes"></div>
   </div>
   <ul class="grid" id="voices"><li class="empty">Loading the voices…</li></ul>
@@ -144,6 +163,8 @@ const CATALOG = `${RAW}/blip-voices/main/catalog.json`
 // file can be five; sixty reads an hour per visitor, then the raw file.
 const API_CATALOG = 'https://api.github.com/repos/DoubleV840/blip-voices/contents/catalog.json'
 const REPORT = 'https://github.com/DoubleV840/blip-voices/issues/new?template=report-voice.yml'
+// One-click likes, counted by the Cloudflare Worker in likes/.
+const LIKES = 'https://blip-likes.ivwi.workers.dev/likes'
 
 // Blip's typewriter, as the plugin plays it: 30 letters a second, pauses at
 // commas and sentence ends, a blip on a letter at most every 45 ms, each cut
@@ -282,13 +303,15 @@ function card(voice) {
   const item = document.createElement('li')
   item.className = 'card'
   item.innerHTML = `
-    <div class="top"><h3></h3><span class="tag"></span></div>
+    <div class="top"><h3></h3><button class="like" aria-pressed="false" hidden><span aria-hidden="true">♥</span><span class="count">0</span></button></div>
+    <span class="tag"></span>
     <p class="desc"></p>
     <div class="actions">
       <button class="play" aria-label="Listen">▶</button>
       <button class="copy" title="Copy"><code></code><span>copy</span></button>
     </div>`
   item.querySelector('h3').textContent = voice.name
+  item.querySelector('.like').setAttribute('aria-label', `Like ${voice.name}`)
   item.querySelector('.tag').textContent = voice.official ? `${voice.theme} · built in` : `${voice.theme} · by ${voice.author}`
   const desc = item.querySelector('.desc')
   desc.textContent = voice.description
@@ -337,6 +360,61 @@ function filter(cards, query, theme) {
   document.getElementById('none').hidden = shown > 0
 }
 
+// Every voice's likes and the ones this visitor likes, or null when the
+// likes service doesn't answer: the site then goes without likes.
+async function loadLikes() {
+  try {
+    const response = await fetch(LIKES, { cache: 'no-store' })
+    return response.ok ? await response.json() : null
+  } catch {
+    return null
+  }
+}
+
+function showLike(entry, count, isLiked) {
+  entry.likes = count
+  const button = entry.item.querySelector('.like')
+  button.querySelector('.count').textContent = count
+  button.setAttribute('aria-pressed', String(isLiked))
+}
+
+// Likes or unlikes at once, then keeps the count the service answers with.
+function likeButton(entry, likes) {
+  const button = entry.item.querySelector('.like')
+  showLike(entry, likes.counts[entry.voice.name] ?? 0, likes.liked.includes(entry.voice.name))
+  button.hidden = false
+  button.addEventListener('click', async () => {
+    const wasLiked = button.getAttribute('aria-pressed') === 'true'
+    const before = entry.likes
+    showLike(entry, before + (wasLiked ? -1 : 1), !wasLiked)
+    button.disabled = true
+    let failure = 'Couldn’t save your like.'
+    try {
+      const response = await fetch(`${LIKES}/${encodeURIComponent(entry.voice.name)}`, { method: wasLiked ? 'DELETE' : 'POST' })
+      if (response.status === 429) failure = 'Easy there! Try again in a minute.'
+      if (!response.ok) throw new Error(failure)
+      const { count, liked } = await response.json()
+      showLike(entry, count, liked)
+    } catch {
+      showLike(entry, before, wasLiked)
+      toast(failure)
+    }
+    button.disabled = false
+  })
+}
+
+// Most liked first, or newest community voices first; ties keep the
+// catalog's order. A like doesn't move the cards until the next sort.
+const ORDERS = {
+  popular: (a, b) => b.likes - a.likes,
+  new: (a, b) => (b.voice.added ?? '').localeCompare(a.voice.added ?? ''),
+}
+
+function sort(cards, by) {
+  const list = document.getElementById('voices')
+  list.prepend(...[...cards].sort(ORDERS[by]).map(entry => entry.item))
+}
+
 // The freshest catalog that answers: the API's, the raw file, this site's copy.
 async function loadCatalog() {
   const attempts = [
@@ -359,14 +437,25 @@ async function main() {
   document.querySelectorAll('header .copy').forEach(copyButton)
   const list = document.getElementById('voices')
   try {
-    const { voices, themes = [] } = await loadCatalog()
-    const cards = voices.map(voice => ({ voice, item: card(voice) }))
+    const [{ voices, themes = [] }, likes] = await Promise.all([loadCatalog(), loadLikes()])
+    const cards = voices.map(voice => ({ voice, item: card(voice), likes: 0 }))
     const none = document.createElement('li')
     none.className = 'empty'
     none.id = 'none'
     none.textContent = 'No voice matches.'
     none.hidden = true
     list.replaceChildren(...cards.map(c => c.item), none)
+    if (likes) cards.forEach(entry => likeButton(entry, likes))
+    document.getElementById('sort').hidden = !likes
+
+    const sortButtons = [...document.querySelectorAll('#sort button')]
+    sortButtons.forEach(button =>
+      button.addEventListener('click', () => {
+        sortButtons.forEach(b => b.setAttribute('aria-pressed', String(b === button)))
+        sort(cards, button.dataset.sort)
+      }),
+    )
+    sort(cards, 'popular')
 
     const search = document.getElementById('search')
     let theme = 'all'

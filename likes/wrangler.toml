@@ -1,0 +1,10 @@
+# The likes service of blip.ivwi.fr. Deploy with `npx wrangler deploy` from
+# this folder; the SALT secret is set once with `npx wrangler secret put SALT`.
+name = "blip-likes"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "blip-likes"
+database_id = "39e946d3-afa9-4173-948d-1353113cb6f0"
