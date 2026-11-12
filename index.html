@@ -42,7 +42,18 @@
   }
   .copy code { overflow-wrap: anywhere; }
   .copy span { color: var(--muted); font-size: 13px; flex: none; }
-  .copy:hover { border-color: var(--accent); }
+  .copy:hover, .copy.copied { border-color: var(--accent); }
+  .copy.copied span { color: var(--accent); }
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; z-index: 1;
+    transform: translate(-50%, 12px); opacity: 0; pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    background: var(--text); color: var(--ink); border-radius: 6px;
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.4);
+    padding: 10px 16px; font-weight: 600; max-width: calc(100% - 32px);
+  }
+  .toast.shown { opacity: 1; transform: translate(-50%, 0); }
+  .toast code { font-size: 13px; }
   .filters { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 24px; }
   .search {
     width: 100%; max-width: 420px; padding: 10px 14px; border-radius: 6px;
@@ -116,6 +127,8 @@
     <a class="button" href="https://github.com/DoubleV840/blip-voices/issues/new?template=submit-voice.yml">Share your voice</a>
   </section>
 </main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <footer>
   <a href="https://github.com/DoubleV840/blip">Blip on GitHub</a> · <a href="https://ko-fi.com/blipivwi">Support on Ko-fi</a>
@@ -220,14 +233,45 @@ async function speak(voice, text, onType) {
   })
 }
 
+// Copies text, falling back to a hidden field where the clipboard API is refused.
+async function copy(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    const field = Object.assign(document.createElement('textarea'), { value: text })
+    field.style.cssText = 'position: fixed; opacity: 0'
+    document.body.append(field)
+    field.select()
+    const isCopied = document.execCommand('copy')
+    field.remove()
+    return isCopied
+  }
+}
+
+let toastTimer
+function toast(message, code) {
+  const box = document.getElementById('toast')
+  box.replaceChildren(message, ...(code ? [' ', Object.assign(document.createElement('code'), { textContent: code })] : []))
+  box.classList.add('shown')
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => box.classList.remove('shown'), 1800)
+}
+
 function copyButton(button) {
   button.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(button.dataset.copy)
+    const text = button.dataset.copy
+    const isCopied = await copy(text)
+    if (!isCopied) return toast('Couldn’t copy: select the command instead.')
+
+    toast('✓ Copied', text)
     const label = button.querySelector('span')
-    if (label) {
-      label.textContent = 'copied'
-      setTimeout(() => (label.textContent = 'copy'), 1500)
-    }
+    button.classList.add('copied')
+    label.textContent = 'copied'
+    setTimeout(() => {
+      button.classList.remove('copied')
+      label.textContent = 'copy'
+    }, 1500)
   })
 }
 
@@ -239,7 +283,7 @@ function card(voice) {
     <p class="desc"></p>
     <div class="actions">
       <button class="play" aria-label="Listen">▶</button>
-      <button class="copy"><code></code></button>
+      <button class="copy" title="Copy"><code></code><span>copy</span></button>
     </div>`
   item.querySelector('h3').textContent = voice.name
   item.querySelector('.tag').textContent = voice.official ? `${voice.theme} · built in` : `${voice.theme} · by ${voice.author}`
