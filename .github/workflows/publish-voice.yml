@@ -112,7 +112,7 @@ jobs:
             git fetch -q "$remote" main && git reset -q --hard FETCH_HEAD
             name=$(python3 scripts/add_voice.py --publish "$RUNNER_TEMP/voice" | sed -n 's/^name=//p')
             [ -n "$name" ] || exit 1
-            git add voices catalog.json
+            git add voices catalog.json removed.json
             git commit -q -m "Add voice $name (#$ISSUE)"
             if git push -q "$remote" HEAD:main; then echo "name=$name" >> "$GITHUB_OUTPUT"; exit 0; fi
             sleep $((attempt * 3))

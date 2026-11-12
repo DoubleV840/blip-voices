@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Only the GitHub account that shared the voice can remove it. It goes within a minute: from [blip.ivwi.fr](https://blip.ivwi.fr), from the `/blip voice` menus and from every Blip that installed it.
-        Its name stays taken afterwards: to share a new version, pick another name.
+        Its name is free again afterwards: you, or anyone, can share a new voice under it.
   - type: input
     id: voice
     attributes:

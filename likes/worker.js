@@ -7,6 +7,8 @@
 // One like per voice and person. A person is known by a salted hash of their
 // address (the SALT secret), never by the address itself. Only voices the
 // catalog lists can be liked, and a person likes ten voices a minute at most.
+// A like is kept under the voice's name and version, so a new voice taking a
+// removed voice's name starts from zero.
 
 const ORIGINS = ['https://blip.ivwi.fr', 'http://localhost:8765']
 const CATALOG = 'https://raw.githubusercontent.com/DoubleV840/blip-voices/main/catalog.json'
@@ -31,17 +33,22 @@ export default {
       const path = new URL(request.url).pathname
 
       if (path === '/likes' && request.method === 'GET') {
+        const voices = await catalog()
         const counts = await env.DB.prepare('SELECT voice, COUNT(*) AS n FROM likes GROUP BY voice').all()
         const mine = await env.DB.prepare('SELECT voice FROM likes WHERE voter = ?').bind(voter).all()
+        const countOf = new Map(counts.results.map(row => [row.voice, row.n]))
+        const isMine = new Set(mine.results.map(row => row.voice))
         return answer({
-          counts: Object.fromEntries(counts.results.map(row => [row.voice, row.n])),
-          liked: mine.results.map(row => row.voice),
+          counts: Object.fromEntries(voices.filter(v => countOf.has(keyOf(v))).map(v => [v.name, countOf.get(keyOf(v))])),
+          liked: voices.filter(v => isMine.has(keyOf(v))).map(v => v.name),
         })
       }
 
-      const voice = path.match(/^\/likes\/([^/]+)$/)?.[1]
-      if (voice === undefined || !['POST', 'DELETE'].includes(request.method)) return answer({ error: 'not found' }, 404)
-      if (!NAME.test(voice) || !(await isListed(voice))) return answer({ error: 'no such voice' }, 404)
+      const name = path.match(/^\/likes\/([^/]+)$/)?.[1]
+      if (name === undefined || !['POST', 'DELETE'].includes(request.method)) return answer({ error: 'not found' }, 404)
+      const listed = NAME.test(name) ? (await catalog()).find(v => v.name === name) : undefined
+      if (listed === undefined) return answer({ error: 'no such voice' }, 404)
+      const voice = keyOf(listed)
 
       if (request.method === 'POST') {
         const since = Date.now() - 60_000
@@ -53,7 +60,7 @@ export default {
       }
 
       const total = await env.DB.prepare('SELECT COUNT(*) AS n FROM likes WHERE voice = ?').bind(voice).first()
-      return answer({ voice, count: total.n, liked: request.method === 'POST' })
+      return answer({ voice: name, count: total.n, liked: request.method === 'POST' })
     } catch {
       return answer({ error: 'something went wrong' }, 500)
     }
@@ -67,10 +74,13 @@ async function voterOf(request, env) {
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-// Whether the catalog lists the voice; Cloudflare keeps the catalog a minute.
-async function isListed(voice) {
+// The voices the catalog lists; Cloudflare keeps the catalog a minute.
+async function catalog() {
   const response = await fetch(CATALOG, { cf: { cacheTtl: 60, cacheEverything: true } })
-  if (!response.ok) return false
+  if (!response.ok) throw new Error(`the catalog answered ${response.status}`)
   const { voices = [] } = await response.json()
-  return voices.some(v => v.name === voice)
+  return voices
 }
+
+// Where a voice's likes are kept: its name, and its version when it has one.
+const keyOf = voice => (voice.version ? `${voice.name}:${voice.version}` : voice.name)

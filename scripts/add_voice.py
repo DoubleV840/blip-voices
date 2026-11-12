@@ -31,6 +31,7 @@ English and French lists of the LDNOOBW project.
 import argparse
 import base64
 import datetime
+import hashlib
 import io
 import json
 import math
@@ -300,8 +301,6 @@ def prepared(name, theme, description, data, extension, title="", check_sound=Tr
         raise Refused("the name takes 2 to 20 letters, digits or dashes, like cat-meow")
     if name in RESERVED or (VOICES / name).exists():
         raise Refused(f"there is already a voice named {name}: pick another name")
-    if name in removed():
-        raise Refused(f"the name {name} belonged to a voice that was removed, and stays taken: pick another name")
     if theme not in THEMES:
         raise Refused(f"the theme is one of {', '.join(THEMES)}")
     if not 1 <= len(description) <= 60:
@@ -312,6 +311,7 @@ def prepared(name, theme, description, data, extension, title="", check_sound=Tr
 def add(name, author, theme, description, data, extension=".wav"):
     name, theme, description, wav = prepared(name, theme, description, data, extension)
     write_voice(VOICES / name, name, author, theme, description, wav)
+    free_name(name)
     build_catalog()
     return name
 
@@ -348,6 +348,7 @@ def publish(folder):
     if (folder / "voice.txt").read_text().strip() != base64.b64encode(wav).decode():
         raise Refused("the prepared voice.txt does not match its voice.wav")
     write_voice(VOICES / name, name, author, theme, description, wav)
+    free_name(name)
     build_catalog()
     return name
 
@@ -384,13 +385,26 @@ def remove(name):
     build_catalog()
 
 
+def free_name(name):
+    """A removed voice's name, taken again by a new voice: Blip stops deleting
+    it, and tells the new one by its version."""
+    if name in removed():
+        REMOVED.write_text(json.dumps(sorted(set(removed()) - {name}), indent=2) + "\n")
+
+
+def version_of(folder):
+    """A fingerprint of a voice's sound: Blip downloads the voice again when it
+    changes, and its likes start over."""
+    return hashlib.sha256((folder / "voice.wav").read_bytes()).hexdigest()[:12]
+
+
 def build_catalog():
     official = [
         {"name": n, "author": "blip", "theme": t, "description": d, "official": True, "variants": v, "spread": s, "vowels": vw}
         for n, d, t, v, s, vw in OFFICIAL
     ]
     community = sorted(
-        (json.loads(p.read_text()) for p in VOICES.glob("*/voice.json")),
+        ({**json.loads(p.read_text()), "version": version_of(p.parent)} for p in VOICES.glob("*/voice.json")),
         key=lambda v: (v.get("added", ""), v["name"]),
         reverse=True,
     )
