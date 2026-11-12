@@ -100,6 +100,15 @@
       "vowels": true
     },
     {
+      "name": "teletype",
+      "author": "asfdh38c",
+      "theme": "retro",
+      "description": "Digital radio teletype",
+      "license": "CC0-1.0",
+      "added": "2026-11-12",
+      "version": "e3c174f47b0e"
+    },
+    {
       "name": "cat-meow",
       "author": "DoubleV840",
       "theme": "cute",
