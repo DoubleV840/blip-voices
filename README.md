@@ -16,9 +16,9 @@ In Claude Code: `/blip voice` (menu) or `/blip voice <name>`.
 
 ## Share yours
 
-1. One short sound, under half a second, that you made yourself: `.wav`, `.mp3`, `.m4a`, `.ogg`, `.flac`… Sounds only, no videos.
-2. Zip it.
-3. Drop it in the [form](https://github.com/DoubleV840/blip-voices/issues/new?template=submit-voice.yml).
+1. One short sound, under half a second, that you made yourself. Sounds only, no videos.
+2. Drop it on [blip.ivwi.fr](https://blip.ivwi.fr/#share), whatever its format (`.mp3`, `.wav`, `.m4a`, `.ogg`, `.flac`, `.aiff`…): you hear it as Blip will, and save it as a `.wav`.
+3. Drag that `.wav` into the [form](https://github.com/DoubleV840/blip-voices/issues/new?template=submit-voice.yml). A `.mp3` or `.wav` you already have can go straight there.
 
 It is checked automatically and, if it passes, goes live within minutes on the site and in everyone's `/blip voice` menu. A voice that three people [report](https://github.com/DoubleV840/blip-voices/issues/new?template=report-voice.yml) is removed, everywhere. Changed your mind about yours? [Remove it](https://github.com/DoubleV840/blip-voices/issues/new?template=remove-my-voice.yml): only the account that shared it can, and it goes at once.
 

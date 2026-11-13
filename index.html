@@ -109,6 +109,27 @@
   .share p { color: var(--muted); margin: 0 0 20px; }
   .share .takedown { margin: 20px 0 0; font-size: 14px; }
   .share .takedown a { color: var(--muted); }
+  .drop {
+    position: relative; display: block; max-width: 520px; margin: 0 auto; padding: 28px 16px;
+    border: 2px dashed var(--line); border-radius: 8px; cursor: pointer; color: var(--muted);
+  }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .drop:hover, .drop.over, .drop:focus-within { border-color: var(--accent); color: var(--text); }
+  .drop.busy { cursor: progress; }
+  .drop strong { display: block; color: var(--text); margin-bottom: 4px; }
+  .drop small { font-size: 13px; }
+  .drop .problem { display: block; margin-top: 10px; color: var(--accent); font-weight: 600; }
+  .ready {
+    max-width: 520px; margin: 16px auto 0; padding: 16px; text-align: left;
+    background: var(--card); border: 2px solid var(--line); border-radius: 8px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .ready.playing { border-color: var(--accent); }
+  .share .ready p { margin: 0; }
+  .ready .said { min-height: 3em; }
+  .ready.playing .said { color: var(--text); }
+  .ready .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .ready .hint { font-size: 14px; }
   .button {
     display: inline-block; background: var(--accent); color: var(--ink);
     font: 12px/1 var(--pixel); padding: 14px 18px; border-radius: 6px; text-decoration: none;
@@ -141,12 +162,28 @@
   </div>
   <ul class="grid" id="voices"><li class="empty">Loading the voices…</li></ul>
 
-  <section class="share">
+  <section class="share" id="share">
     <h2>Got a sound?</h2>
-    <p>One short sound, under half a second, that you made yourself: .wav, .mp3, .m4a, .ogg…<br>
+    <p>One short sound, under half a second, that you made yourself.<br>
       Checked automatically, live within minutes. Something wrong with a voice? Report it.</p>
-    <a class="button" href="https://github.com/DoubleV840/blip-voices/issues/new?template=submit-voice.yml">Share your voice</a>
-    <p class="takedown">Shared one and changed your mind? <a href="https://github.com/DoubleV840/blip-voices/issues/new?template=remove-my-voice.yml">Remove it</a>.</p>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.oga,.opus,.flac,.aif,.aiff,.caf">
+      <strong>Drop your sound here, or click to pick it</strong>
+      <small>.mp3, .wav, .m4a, .ogg, .flac, .aiff… any sound</small>
+      <span class="problem" id="problem" role="alert" hidden></span>
+    </label>
+    <div class="ready" id="ready" hidden>
+      <div class="top"><h3 id="ready-name"></h3><span class="tag" id="ready-length"></span></div>
+      <p class="said" id="said"></p>
+      <div class="row">
+        <button class="play" id="hear" aria-label="Listen to your voice">▶</button>
+        <a class="button" id="save" download>1 · Save it</a>
+        <a class="button" id="form" target="_blank" rel="noopener">2 · Open the form</a>
+      </div>
+      <p class="hint">Then drag the saved <code id="saved-name"></code> into the form’s Sound field.</p>
+    </div>
+    <p class="takedown">Already a .mp3 or .wav? <a class="form-link">Straight to the form</a>.
+      Shared one and changed your mind? <a href="https://github.com/DoubleV840/blip-voices/issues/new?template=remove-my-voice.yml">Remove it</a>.</p>
   </section>
 </main>
 
@@ -166,6 +203,7 @@ const CATALOG = `${RAW}/blip-voices/main/catalog.json`
 // file can be five; sixty reads an hour per visitor, then the raw file.
 const API_CATALOG = 'https://api.github.com/repos/DoubleV840/blip-voices/contents/catalog.json'
 const REPORT = 'https://github.com/DoubleV840/blip-voices/issues/new?template=report-voice.yml'
+const FORM = 'https://github.com/DoubleV840/blip-voices/issues/new?template=submit-voice.yml'
 // One-click likes, counted by the Cloudflare Worker in likes/.
 const LIKES = 'https://blip-likes.ivwi.workers.dev/likes'
 
@@ -436,8 +474,219 @@ async function loadCatalog() {
   throw new Error('no catalog answered')
 }
 
+// ---- Sharing a voice ------------------------------------------------------
+// GitHub's form takes a .mp3 or a .wav, nothing else. Any sound the browser
+// can read becomes here a .wav of its first 2 s, mono, 22050 Hz, which the
+// publishing script (scripts/add_voice.py) reads as it is. The preview makes
+// it uniform the way that script does, so what you hear is the voice.
+const RATE = 22050
+const READ_SECONDS = 2
+const MAX_SECONDS = 0.3
+const MIN_SECONDS = 0.02
+const FADE_SECONDS = 0.01
+const TARGET_RMS = 0.12
+const PEAK = 0.9
+const MAX_FILE = 50 * 1024 * 1024
+const NAME = /^[a-z0-9][a-z0-9-]{1,19}$/
+
+class Unfit extends Error {}
+
+// An AIFF's samples, which Chrome and Firefox can't decode: plain PCM (or
+// AIFF-C's sowt and float), read here. Null when it is no such file.
+function aiff(data, seconds) {
+  const view = new DataView(data)
+  const word = at => String.fromCharCode(...new Uint8Array(data, at, 4))
+  if (data.byteLength < 12 || word(0) !== 'FORM' || !['AIFF', 'AIFC'].includes(word(8))) return null
+  let channels, frames, bits, rate, format, start
+  for (let at = 12; at + 8 <= data.byteLength; ) {
+    const size = view.getUint32(at + 4)
+    if (word(at) === 'COMM' && size >= 18) {
+      channels = view.getInt16(at + 8)
+      frames = view.getUint32(at + 10)
+      bits = view.getInt16(at + 14)
+      const exponent = view.getUint16(at + 16) & 0x7fff
+      rate = (view.getUint32(at + 18) * 2 ** 32 + view.getUint32(at + 22)) * 2 ** (exponent - 16383 - 63)
+      format = word(8) === 'AIFC' && size >= 22 ? word(at + 26) : 'NONE'
+    } else if (word(at) === 'SSND') {
+      start = at + 16 + view.getUint32(at + 8)
+    }
+    at += 8 + size + (size % 2)
+  }
+  const isFloat = /^(fl32|FL32|fl64|FL64)$/.test(format)
+  if (!channels || !rate || start === undefined || !(isFloat || /^(NONE|twos|sowt)$/.test(format))) return null
+
+  const width = isFloat ? (format.endsWith('32') ? 4 : 8) : Math.ceil(bits / 8)
+  const isLittle = format === 'sowt'
+  const full = 2 ** (8 * width)
+  const sample = at => {
+    if (isFloat) return width === 4 ? view.getFloat32(at) : view.getFloat64(at)
+    let value = 0
+    for (let b = 0; b < width; b++) value = value * 256 + view.getUint8(isLittle ? at + width - 1 - b : at + b)
+    return (value >= full / 2 ? value - full : value) / (full / 2)
+  }
+  const length = Math.min(frames, Math.floor((data.byteLength - start) / (channels * width)), Math.ceil(seconds * rate) + 2)
+  const channelData = Array.from({ length: channels }, () => new Float32Array(Math.max(length, 0)))
+  for (let f = 0; f < length; f++) {
+    for (let c = 0; c < channels; c++) channelData[c][f] = sample(start + (f * channels + c) * width)
+  }
+  return { sampleRate: rate, length, numberOfChannels: channels, getChannelData: c => channelData[c] }
+}
+
+// The mono samples at RATE of a sound's first READ_SECONDS.
+async function samplesFrom(file) {
+  if (file.size > MAX_FILE) throw new Unfit('This file is big for one short sound: cut it to a second or two.')
+  const data = await file.arrayBuffer()
+  let decoded
+  try {
+    // A copy: decoding may detach the bytes it is given.
+    decoded = await new OfflineAudioContext(1, 1, RATE).decodeAudioData(data.slice(0))
+  } catch {
+    decoded = aiff(data, READ_SECONDS)
+    if (!decoded) throw new Unfit('Your browser can’t read this file. Try another browser (Safari reads the most), or export it as .mp3 or .wav.')
+  }
+  // Decoded at RATE already; resampled otherwise, as add_voice.py would.
+  const step = decoded.sampleRate / RATE
+  const length = Math.min(step === 1 ? decoded.length : Math.floor((decoded.length - 1) / step), READ_SECONDS * RATE)
+  const channels = Array.from({ length: decoded.numberOfChannels }, (_, c) => decoded.getChannelData(c))
+  const mono = new Float32Array(Math.max(length, 0))
+  for (let j = 0; j < mono.length; j++) {
+    const i = Math.floor(j * step)
+    const t = j * step - i
+    for (const channel of channels) mono[j] += (t ? channel[i] + (channel[i + 1] - channel[i]) * t : channel[i]) / channels.length
+  }
+  return mono
+}
+
+// Silence trimmed, cut to MAX_SECONDS, faded, levelled: add_voice.py's uniform().
+function uniform(input) {
+  let peak = 0
+  for (const s of input) peak = Math.max(peak, Math.abs(s))
+  if (peak < 0.001) throw new Unfit('This sound is silent.')
+  const first = input.findIndex(s => Math.abs(s) > peak * 0.05)
+  const last = input.findLastIndex(s => Math.abs(s) > peak * 0.05)
+  const samples = Array.from(input.subarray(first, last + 1).subarray(0, Math.floor(MAX_SECONDS * RATE)))
+  if (samples.length < MIN_SECONDS * RATE) throw new Unfit('This sound is too short once its silence is trimmed.')
+  const fade = Math.min(samples.length, Math.floor(FADE_SECONDS * RATE))
+  for (let i = 0; i < fade; i++) samples[samples.length - 1 - i] *= i / fade
+  const rms = Math.sqrt(samples.reduce((sum, s) => sum + s * s, 0) / samples.length) || 1
+  let scale = TARGET_RMS / rms
+  const top = samples.reduce((most, s) => Math.max(most, Math.abs(s)), 0) * scale
+  if (top > PEAK) scale *= PEAK / top
+  return Float32Array.from(samples, s => s * scale)
+}
+
+// A mono 16-bit PCM WAV at RATE.
+function wavOf(samples) {
+  const view = new DataView(new ArrayBuffer(44 + samples.length * 2))
+  const text = (at, word) => [...word].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)))
+  text(0, 'RIFF')
+  view.setUint32(4, 36 + samples.length * 2, true)
+  text(8, 'WAVEfmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, RATE, true)
+  view.setUint32(28, RATE * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  text(36, 'data')
+  view.setUint32(40, samples.length * 2, true)
+  samples.forEach((s, i) => view.setInt16(44 + i * 2, Math.trunc(Math.max(-1, Math.min(1, s)) * 32767), true))
+  return new Blob([view], { type: 'audio/wav' })
+}
+
+// The form, its title and name filled in when the file's name makes a voice name.
+function formUrl(name) {
+  return NAME.test(name) ? `${FORM}&title=${encodeURIComponent(`Voice: ${name}`)}&name=${encodeURIComponent(name)}` : FORM
+}
+
+function shareBox() {
+  const drop = document.getElementById('drop')
+  const input = document.getElementById('file')
+  const problem = document.getElementById('problem')
+  const ready = document.getElementById('ready')
+  const said = document.getElementById('said')
+  const hear = document.getElementById('hear')
+  const save = document.getElementById('save')
+  const form = document.getElementById('form')
+  const preview = { name: ' your voice', spread: 4 }
+  const line = 'Hello there! This is your voice. Shall we write some code?'
+  document.querySelectorAll('.form-link').forEach(link => (link.href = FORM))
+
+  async function listen() {
+    if (ready.classList.contains('playing')) return
+    ready.classList.add('playing')
+    try {
+      await speak(preview, line, typed => (said.textContent = typed))
+    } catch {
+      said.textContent = 'Couldn’t play it here, but it may still work: save it and try.'
+      return ready.classList.remove('playing')
+    }
+    ready.classList.remove('playing')
+  }
+
+  async function prepare(file) {
+    // Inside the click or drop, so the preview is allowed to play.
+    audio ??= new AudioContext()
+    const isAudible = Promise.race([audio.resume().then(() => true), new Promise(r => setTimeout(r, 300, false))])
+    problem.hidden = true
+    drop.classList.add('busy')
+    try {
+      const samples = await samplesFrom(file)
+      const voice = uniform(samples)
+      const buffer = audio.createBuffer(1, voice.length, RATE)
+      buffer.copyToChannel(voice, 0)
+      buffers.set(preview.name, Promise.resolve([buffer]))
+
+      const stem = file.name.replace(/\.[^.]*$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'voice'
+      const saved = `${stem}-blip.wav`
+      if (save.href) URL.revokeObjectURL(save.href)
+      save.href = URL.createObjectURL(wavOf(samples))
+      save.download = saved
+      form.href = formUrl(stem)
+      document.getElementById('saved-name').textContent = saved
+      document.getElementById('ready-name').textContent = stem
+      document.getElementById('ready-length').textContent = `${(voice.length / RATE).toFixed(2)} s`
+      said.textContent = line
+      ready.hidden = false
+      ready.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      if (await isAudible) listen()
+    } catch (error) {
+      ready.hidden = true
+      problem.textContent = error instanceof Unfit ? error.message : 'Couldn’t read this file. Is it a sound?'
+      problem.hidden = false
+    }
+    drop.classList.remove('busy')
+  }
+
+  hear.addEventListener('click', listen)
+  input.addEventListener('change', () => {
+    if (input.files[0]) prepare(input.files[0])
+    input.value = ''
+  })
+  // A file dropped anywhere on the page lands here; never opened by the browser.
+  addEventListener('dragover', event => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    drop.classList.add('over')
+  })
+  addEventListener('dragleave', event => {
+    if (event.relatedTarget === null) drop.classList.remove('over')
+  })
+  addEventListener('drop', event => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    drop.classList.remove('over')
+    const file = event.dataTransfer?.files[0]
+    if (!file) return
+    drop.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    prepare(file)
+  })
+}
+
 async function main() {
   document.querySelectorAll('header .copy').forEach(copyButton)
+  shareBox()
   const list = document.getElementById('voices')
   try {
     const [{ voices, themes = [] }, likes] = await Promise.all([loadCatalog(), loadLikes()])

@@ -58,6 +58,7 @@ SHARED_BLOCKLISTS = [
     "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/fr",
 ]
 
+SITE = "https://blip.ivwi.fr"
 RATE = 22050
 MAX_SECONDS = 0.3
 MIN_SECONDS = 0.02
@@ -71,7 +72,8 @@ LOGIN = re.compile(r"^[A-Za-z0-9-]{1,39}$")
 MIN_ACCOUNT_DAYS = 7
 MAX_PER_DAY = 3
 AUDIO = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".aif", ".aiff", ".caf"}
-# A file attached to an issue: GitHub takes audio zipped.
+# A file attached to an issue: GitHub takes a .mp3 or a .wav as it is; other
+# sounds come zipped (still read, though the site now turns them into a .wav).
 ATTACHMENT = re.compile(r"https://github\.com/(?:user-attachments/files|[\w.-]+/[\w.-]+/files)/\d+/[^\s)\]]+")
 
 THEMES = ["retro", "cute", "soft", "machine", "creature", "dark", "weird"]
@@ -180,7 +182,7 @@ def audio_from(data, url):
         raise Refused("the zip holds no sound file (.wav, .mp3, .m4a, .ogg, .flac...) under 2 MB")
     if Path(name).suffix in AUDIO:
         return data, Path(name).suffix
-    raise Refused(f"{name} is not a zipped sound file")
+    raise Refused(f"{name} is not a sound: send a .mp3 or .wav (any other sound: drop it on {SITE}/#share first)")
 
 
 def has_video(path):
@@ -422,7 +424,7 @@ def submission():
     check_words(title, fields.get("voice name", ""), fields.get("description", ""))
     url = ATTACHMENT.search(fields.get("sound", ""))
     if url is None:
-        raise Refused("no sound attached: drag your sound file (or a zip of it) into the Sound field")
+        raise Refused(f"no sound attached: drag your .mp3 or .wav into the Sound field (any other sound: drop it on {SITE}/#share first)")
     data, extension = audio_from(download(url.group(0)), url.group(0))
     return title, fields, data, extension
 

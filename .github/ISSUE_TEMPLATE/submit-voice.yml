@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         One short sound, under half a second: Blip plays it on every letter and changes its pitch itself.
-        Sounds only, no videos: `.wav`, `.mp3`, `.m4a`, `.ogg`, `.flac`… Drop the file in the **Sound** field (zip it first if GitHub refuses it).
+        Sounds only, no videos. A `.mp3` or a `.wav` goes as it is in the **Sound** field. Any other sound (`.m4a`, `.ogg`, `.flac`, `.aiff`…): drop it on [blip.ivwi.fr](https://blip.ivwi.fr/#share) first, which turns it into a `.wav` and plays it as Blip will.
         It is checked automatically and, if it passes, goes live within minutes on [blip.ivwi.fr](https://blip.ivwi.fr) and in everyone's `/blip voice` menu.
         Shared from a GitHub account at least a week old, three voices a day at most. A voice three people report is removed.
   - type: input
@@ -44,7 +44,7 @@ body:
     id: sound
     attributes:
       label: Sound
-      description: Drag your sound file here (or a zip of it).
+      description: Drag your `.mp3` or `.wav` here.
     validations:
       required: true
   - type: checkboxes
