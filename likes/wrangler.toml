@@ -1,5 +1,9 @@
-# The likes service of blip.ivwi.fr. Deploy with `npx wrangler deploy` from
-# this folder; the SALT secret is set once with `npx wrangler secret put SALT`.
+# The service of blip.ivwi.fr: likes, and voices shared from the site. Deploy
+# with `npx wrangler deploy` from this folder; the tables with
+# `npx wrangler d1 execute blip-likes --remote --file schema.sql`. Secrets, set
+# once with `npx wrangler secret put <NAME>`: SALT (any random text), and
+# GITHUB_TOKEN (a fine-grained token for DoubleV840/blip-voices with only
+# Actions: read and write, which starts the workflows that publish and remove).
 name = "blip-likes"
 main = "worker.js"
 compatibility_date = "2025-06-01"

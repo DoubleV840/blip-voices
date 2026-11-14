@@ -9,7 +9,12 @@ In the GitHub workflow that publishes a submission, in two jobs:
 The first reads ISSUE_TITLE, ISSUE_BODY, ISSUE_AUTHOR and AUTHOR_CREATED (the
 account's creation date) from the environment and handles the submitted file,
 with no credentials; the second never opens that file. Both print `key=value`
-lines for the workflow (status, name, reason).
+lines for the workflow (status, name, reason; and version, once published).
+
+A voice shared from the site, with no GitHub account, comes as a folder that
+site_voice.py fetched (submission.json and sound.wav, the .wav the site made):
+
+    python3 scripts/add_voice.py --prepare-site IN OUT   # check IN, write the voice to OUT
 
 By hand:
 
@@ -68,6 +73,8 @@ PEAK = 0.9
 MAX_DOWNLOAD = 2 * 1024 * 1024
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,19}$")
 LOGIN = re.compile(r"^[A-Za-z0-9-]{1,39}$")
+# The name someone types on the site, shown as "by <name>".
+SITE_AUTHOR = re.compile(r"^[^\W_][\w .'-]{0,23}$")
 # Against throwaway accounts and floods.
 MIN_ACCOUNT_DAYS = 7
 MAX_PER_DAY = 3
@@ -139,8 +146,10 @@ def check_words(*texts):
     for text in texts:
         words = plain_words(text)
         held = [re.sub(r"(.)\1+", r"\1", w) for w in words]
+        # Letters spread out (f-u-n stuff) joined back: "fun stuff".
+        spread = re.sub(r"\b([a-z]) (?=[a-z]\b)", r"\1", " ".join(words)).split()
         squashed = "".join(words)
-        for spelled in (words, held):
+        for spelled in (words, held, spread):
             joined = f" {' '.join(spelled)} "
             if any(f" {term} " in joined for term in terms):
                 raise Offensive("its name, title or description holds a word that isn't allowed")
@@ -318,7 +327,7 @@ def add(name, author, theme, description, data, extension=".wav"):
     return name
 
 
-def write_voice(folder, name, author, theme, description, wav):
+def write_voice(folder, name, author, theme, description, wav, source=None):
     folder.mkdir(parents=True)
     (folder / "voice.wav").write_bytes(wav)
     (folder / "voice.txt").write_text(base64.b64encode(wav).decode() + "\n")
@@ -330,6 +339,10 @@ def write_voice(folder, name, author, theme, description, wav):
         "license": "CC0-1.0",
         "added": datetime.date.today().isoformat(),
     }
+    if source:
+        # Shared from the site: its author is a name anyone could type, not
+        # an account, so it can't remove the voice with the GitHub form.
+        meta["source"] = source
     (folder / "voice.json").write_text(json.dumps(meta, indent=2) + "\n")
 
 
@@ -339,7 +352,12 @@ def publish(folder):
     meta = json.loads((folder / "voice.json").read_text())
     wav = (folder / "voice.wav").read_bytes()
     name, author = str(meta.get("name", "")), str(meta.get("author", ""))
-    if not LOGIN.match(author):
+    source = "site" if meta.get("source") == "site" else None
+    if source:
+        if site_author(author) != author:
+            raise Refused("the author is not a name the site takes")
+        check_words(author)
+    elif not LOGIN.match(author):
         raise Refused("the author is not a GitHub login")
     name, theme, description, _ = prepared(name, str(meta.get("theme", "")), str(meta.get("description", "")), b"", ".wav", check_sound=False)
     with wave.open(io.BytesIO(wav)) as sound:
@@ -349,9 +367,33 @@ def publish(folder):
         raise Refused("the prepared sound is not what --prepare-issue writes")
     if (folder / "voice.txt").read_text().strip() != base64.b64encode(wav).decode():
         raise Refused("the prepared voice.txt does not match its voice.wav")
-    write_voice(VOICES / name, name, author, theme, description, wav)
+    write_voice(VOICES / name, name, author, theme, description, wav, source)
     free_name(name)
     build_catalog()
+    return name
+
+
+def site_author(author):
+    """The name typed on the site, spaces tidied: anonymous when left empty."""
+    author = " ".join((author or "").split())
+    if not author:
+        return "anonymous"
+    if not SITE_AUTHOR.match(author):
+        raise Refused("your name takes 1 to 24 letters, digits, spaces, dots or dashes")
+    return author
+
+
+def prepare_site(source, folder):
+    """Checks a voice shared from the site and writes it to `folder`. The
+    sound is the .wav the site made, read here with no ffmpeg."""
+    fields = json.loads((source / "submission.json").read_text())
+    author = site_author(str(fields.get("author", "")))
+    check_words(author)
+    name, theme, description, _ = prepared(
+        str(fields.get("name", "")), str(fields.get("theme", "")), str(fields.get("description", "")), b"", ".wav", check_sound=False
+    )
+    wav = wav_bytes(uniform(*samples_of((source / "sound.wav").read_bytes())))
+    write_voice(folder, name, author, theme, description, wav, source="site")
     return name
 
 
@@ -444,7 +486,8 @@ def prepare_issue(folder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--prepare-issue", metavar="DIR", type=Path, help="check the submission in the environment")
-    parser.add_argument("--publish", metavar="DIR", type=Path, help="add a voice --prepare-issue wrote")
+    parser.add_argument("--prepare-site", metavar=("IN", "OUT"), type=Path, nargs=2, help="check a voice shared from the site")
+    parser.add_argument("--publish", metavar="DIR", type=Path, help="add a voice --prepare-issue or --prepare-site wrote")
     parser.add_argument("--remove", metavar="NAME", help="remove a community voice")
     parser.add_argument("--catalog-only", action="store_true", help="only rebuild catalog.json")
     parser.add_argument("--name")
@@ -463,8 +506,11 @@ def main():
         elif args.prepare_issue:
             name, theme, seconds = prepare_issue(args.prepare_issue)
             print(f"status=ok\nname={name}\ntheme={theme}\nseconds={seconds:.2f}")
+        elif args.prepare_site:
+            print(f"status=ok\nname={prepare_site(*args.prepare_site)}")
         elif args.publish:
-            print(f"status=ok\nname={publish(args.publish)}")
+            name = publish(args.publish)
+            print(f"status=ok\nname={name}\nversion={version_of(VOICES / name)}")
         else:
             if not (args.name and args.author and args.theme and args.description and args.file):
                 parser.error("give --name, --author, --theme, --description and a sound file")
@@ -472,7 +518,7 @@ def main():
             print(f"name={name}")
     except Refused as refused:
         # Checking a submission, a refusal is an answer, not a failure.
-        if args.prepare_issue:
+        if args.prepare_issue or args.prepare_site:
             status = "offensive" if isinstance(refused, Offensive) else "invalid"
             print(f"status={status}\nreason={refused}")
             return

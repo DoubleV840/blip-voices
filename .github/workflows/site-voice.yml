@@ -1,0 +1,88 @@
+# Publishes a voice shared from the site (blip.ivwi.fr), by someone with no
+# GitHub account. The site's Worker (likes/worker.js) keeps the submission and
+# starts this workflow with its id; the workflow fetches it, checks it as
+# publish-voice.yml would, publishes it, and tells the Worker each step, so
+# the site shows how far it is.
+#
+# The sound is the .wav the site made, read by Python alone (no ffmpeg), so
+# one job does it all. The Worker trusts the job by the token GitHub signs for
+# it (id-token: write), and nothing else.
+name: Publish a voice from the site
+run-name: Voice from the site ${{ inputs.id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      id:
+        description: The submission's id, as the Worker gave it
+        required: true
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ID: ${{ inputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch the submission
+        run: python3 scripts/site_voice.py fetch "$ID" "$RUNNER_TEMP/submission"
+
+      - name: Check it
+        id: check
+        run: python3 scripts/add_voice.py --prepare-site "$RUNNER_TEMP/submission" "$RUNNER_TEMP/voice" >> "$GITHUB_OUTPUT"
+
+      - name: Say what to fix
+        if: steps.check.outputs.status != 'ok'
+        env:
+          REASON: ${{ steps.check.outputs.reason }}
+        run: python3 scripts/site_voice.py status "$ID" refused --reason "$REASON"
+
+      # Onto the latest catalog, again if another voice got there first.
+      - name: Publish
+        id: publish
+        if: steps.check.outputs.status == 'ok'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ERROR_FILE: ${{ runner.temp }}/error.txt
+        run: |
+          python3 scripts/site_voice.py status "$ID" publishing
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          for attempt in 1 2 3 4 5; do
+            git fetch -q "$remote" main && git reset -q --hard FETCH_HEAD
+            out=$(python3 scripts/add_voice.py --publish "$RUNNER_TEMP/voice") || exit 1
+            name=$(printf '%s\n' "$out" | sed -n 's/^name=//p')
+            version=$(printf '%s\n' "$out" | sed -n 's/^version=//p')
+            git add voices catalog.json removed.json
+            git commit -q -m "Add voice $name (from the site)"
+            if git push -q "$remote" HEAD:main; then
+              printf 'name=%s\nversion=%s\n' "$name" "$version" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          exit 1
+
+      - name: Say it is live
+        if: steps.publish.outcome == 'success'
+        env:
+          NAME: ${{ steps.publish.outputs.name }}
+          VERSION: ${{ steps.publish.outputs.version }}
+        run: python3 scripts/site_voice.py status "$ID" live --name "$NAME" --version "$VERSION"
+
+      - name: Say what went wrong
+        if: failure() && steps.publish.outcome != 'success'
+        env:
+          ERROR_FILE: ${{ runner.temp }}/error.txt
+        run: |
+          reason="$(cat "$ERROR_FILE" 2>/dev/null || echo "something went wrong on our side")"
+          python3 scripts/site_voice.py status "$ID" refused --reason "$reason"

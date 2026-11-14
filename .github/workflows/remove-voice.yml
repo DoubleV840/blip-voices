@@ -1,7 +1,9 @@
 # Removes a community voice: from the site, from the menu, and from every
 # machine that installed it the next time Blip reads the catalog.
-# Run it from the Actions tab: Remove a voice → Run workflow.
+# Run it from the Actions tab: Remove a voice → Run workflow. The site's
+# Worker runs it too, when whoever shared a voice from the site removes it.
 name: Remove a voice
+run-name: Remove ${{ inputs.name }}
 
 on:
   workflow_dispatch:
@@ -18,23 +20,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          persist-credentials: false
 
+      # Onto the latest catalog, again if another change got there first.
       - name: Remove it
-        id: remove
         env:
+          GH_TOKEN: ${{ github.token }}
           NAME: ${{ inputs.name }}
-        run: python3 scripts/add_voice.py --remove "$NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Publish
-        env:
-          NAME: ${{ steps.remove.outputs.name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A voices catalog.json removed.json
-          git commit -m "Remove voice $NAME"
-          git push
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          for attempt in 1 2 3 4 5; do
+            git fetch -q "$remote" main && git reset -q --hard FETCH_HEAD
+            name=$(python3 scripts/add_voice.py --remove "$NAME" | sed -n 's/^name=//p')
+            [ -n "$name" ] || exit 1
+            git add -A voices catalog.json removed.json
+            git commit -q -m "Remove voice $name"
+            git push -q "$remote" HEAD:main && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1

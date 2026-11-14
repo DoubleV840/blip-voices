@@ -39,7 +39,10 @@ def reported(body):
 
 
 def author_of(name):
-    return json.loads((VOICES / name / "voice.json").read_text()).get("author", "")
+    """The GitHub account that shared a voice; none for a voice shared from
+    the site, whose author is only a name (its sharer removes it from there)."""
+    meta = json.loads((VOICES / name / "voice.json").read_text())
+    return "" if meta.get("source") == "site" else meta.get("author", "")
 
 
 def is_old_enough(login):
@@ -65,7 +68,8 @@ def main():
     is_maintainer = os.environ.get("ASSOCIATION", "") in MAINTAINERS
 
     if is_removal(body):
-        is_own = os.environ["AUTHOR"].lower() == author_of(name).lower()
+        author = author_of(name)
+        is_own = bool(author) and os.environ["AUTHOR"].lower() == author.lower()
         print(f"action={'remove' if is_own or is_maintainer else 'refuse'}\nname={name}\nissues={numbers}")
         return
 
