@@ -131,8 +131,55 @@
   .ready .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .ready .hint { font-size: 14px; }
   .button {
-    display: inline-block; background: var(--accent); color: var(--ink);
+    display: inline-block; background: var(--accent); color: var(--ink); border: 0;
     font: 12px/1 var(--pixel); padding: 14px 18px; border-radius: 6px; text-decoration: none;
+  }
+  .button:disabled { opacity: 0.6; cursor: progress; }
+  .fields { display: flex; flex-direction: column; gap: 14px; padding-top: 12px; border-top: 2px solid var(--line); }
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+  .field small { color: var(--muted); font-size: 13px; }
+  .field input {
+    width: 100%; padding: 8px 12px; border-radius: 6px; font: inherit; color: var(--text);
+    background: var(--bg); border: 2px solid var(--line);
+  }
+  .field input::placeholder { color: var(--muted); opacity: 0.7; }
+  .field input:focus, .field input[aria-invalid="true"] { outline: none; border-color: var(--accent); }
+  .pick { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 14px; }
+  .pick legend { padding: 0; margin-bottom: 6px; }
+  .pick label { position: relative; }
+  .pick input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+  .pick span {
+    display: inline-block; padding: 3px 11px; border: 2px solid var(--line); border-radius: 999px;
+    font-size: 13px; color: var(--muted);
+  }
+  .pick label:hover span { border-color: var(--accent); color: var(--text); }
+  .pick input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--ink); }
+  .pick input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .pick.wrong span { border-style: dashed; }
+  .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--muted); cursor: pointer; }
+  .check input { flex: none; width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--accent); }
+  .problem { color: var(--accent); font-weight: 600; }
+  .share .alt { font-size: 13px; }
+  .share .alt a, .share .alt button { color: var(--muted); }
+  .meter {
+    display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; padding: 4px;
+    background: var(--bg); border: 2px solid var(--line); border-radius: 4px;
+  }
+  .meter i { height: 14px; background: var(--line); }
+  .meter i.on { background: var(--accent); }
+  .meter i.now { animation: blink 0.8s steps(2, jump-none) infinite; }
+  .meter.stopped i.on { background: var(--muted); }
+  @keyframes blink { from { background: var(--line); } to { background: var(--accent); } }
+  .steps { list-style: none; margin: 0; padding: 0; display: flex; justify-content: space-between; gap: 6px; font: 9px/1.6 var(--pixel); color: var(--muted); }
+  .steps .done { color: var(--text); }
+  .steps .done::before { content: "✓ "; color: var(--accent); }
+  .steps .now { color: var(--accent); }
+  .ready.done .said { color: var(--text); }
+  .ready .copy { padding: 6px 10px; }
+  .ready .copy code { font-size: 12px; }
+  .report.remove { background: none; border: 0; padding: 0; font: inherit; font-size: 12px; text-decoration: underline; }
+  @media (prefers-reduced-motion: reduce) {
+    .meter i.now { animation: none; background: var(--accent); opacity: 0.5; }
   }
   footer { text-align: center; color: var(--muted); padding-top: 24px; padding-bottom: 40px; font-size: 14px; }
   footer a { color: var(--muted); }
@@ -165,7 +212,7 @@
   <section class="share" id="share">
     <h2>Got a sound?</h2>
     <p>One short sound, under half a second, that you made yourself.<br>
-      Checked automatically, live within minutes. Something wrong with a voice? Report it.</p>
+      No account needed: checked automatically, live in about a minute.</p>
     <label class="drop" id="drop">
       <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.oga,.opus,.flac,.aif,.aiff,.caf">
       <strong>Drop your sound here, or click to pick it</strong>
@@ -176,14 +223,38 @@
       <div class="top"><h3 id="ready-name"></h3><span class="tag" id="ready-length"></span></div>
       <p class="said" id="said"></p>
       <div class="row">
-        <button class="play" id="hear" aria-label="Listen to your voice">▶</button>
-        <a class="button" id="save" download>1 · Save it</a>
-        <a class="button" id="form" target="_blank" rel="noopener">2 · Open the form</a>
+        <button class="play" id="hear" type="button" aria-label="Listen to your voice">▶</button>
+        <span class="hint">That’s how Blip will sound with it.</span>
       </div>
-      <p class="hint">Then drag the saved <code id="saved-name"></code> into the form’s Sound field.</p>
+      <form class="fields" id="send" novalidate>
+        <label class="field">Name <small>People will type <code id="command">/blip voice …</code></small>
+          <input type="text" id="f-name" maxlength="24" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="cat-meow"></label>
+        <fieldset class="pick" id="f-theme"><legend>Theme</legend></fieldset>
+        <label class="field">Description
+          <input type="text" id="f-description" maxlength="60" placeholder="a wet little bloop"></label>
+        <label class="field">Your name <small>Optional, shown as “by …”</small>
+          <input type="text" id="f-author" maxlength="24" autocomplete="nickname" placeholder="anonymous"></label>
+        <label class="check"><input type="checkbox" id="f-rules">
+          <span>I made this sound myself (or it’s public domain), it isn’t from a game, a film, a show or a song, nothing in it is offensive, and I share it under CC0.</span></label>
+        <p class="problem" id="send-problem" role="alert" hidden></p>
+        <div class="row"><button class="button" type="submit" id="send-button">Share it</button></div>
+      </form>
+      <p class="alt">Rather use GitHub? <a id="save" download>Save the .wav</a>, then drag it into <a id="form" target="_blank" rel="noopener">the form</a>.</p>
     </div>
-    <p class="takedown">Already a .mp3 or .wav? <a class="form-link">Straight to the form</a>.
-      Shared one and changed your mind? <a href="https://github.com/DoubleV840/blip-voices/issues/new?template=remove-my-voice.yml">Remove it</a>.</p>
+    <div class="ready" id="progress" hidden>
+      <div class="top"><h3 id="p-name"></h3><span class="tag" id="p-time"></span></div>
+      <div class="meter" id="p-meter" role="progressbar" aria-label="Sharing your voice" aria-valuemin="0" aria-valuemax="100"></div>
+      <ol class="steps" id="p-steps"><li>Send</li><li>Queue</li><li>Check</li><li>Publish</li></ol>
+      <p class="said" id="p-said" aria-live="polite"></p>
+      <div class="row" id="p-live" hidden>
+        <button class="copy" id="p-copy"><code></code><span>copy</span></button>
+      </div>
+      <div class="row" id="p-again" hidden><button class="button" type="button" id="p-fix">Fix it</button></div>
+    </div>
+    <p class="takedown">Rather use GitHub? <a class="form-link">Here’s the form</a>.
+      Changed your mind? A voice you shared from here has a <em>remove</em> link on its card, in this browser;
+      shared from GitHub, <a href="https://github.com/DoubleV840/blip-voices/issues/new?template=remove-my-voice.yml">remove it there</a>.
+      Something wrong with a voice? Report it.</p>
   </section>
 </main>
 
@@ -204,8 +275,38 @@ const CATALOG = `${RAW}/blip-voices/main/catalog.json`
 const API_CATALOG = 'https://api.github.com/repos/DoubleV840/blip-voices/contents/catalog.json'
 const REPORT = 'https://github.com/DoubleV840/blip-voices/issues/new?template=report-voice.yml'
 const FORM = 'https://github.com/DoubleV840/blip-voices/issues/new?template=submit-voice.yml'
-// One-click likes, counted by the Cloudflare Worker in likes/.
-const LIKES = 'https://blip-likes.ivwi.workers.dev/likes'
+// The Cloudflare Worker in likes/: one-click likes, and the voices shared
+// from here, which it hands to the workflow that checks and publishes them
+// (site-voice.yml), saying how far each one is.
+const SERVICE = 'https://blip-likes.ivwi.workers.dev'
+const LIKES = `${SERVICE}/likes`
+const SHARE = `${SERVICE}/voices`
+
+// What this browser remembers: the voice it is sharing, and the keys that
+// remove the voices it shared. Wiped with the site's data, and that's fine.
+const remembered = {
+  get(key, fallback) {
+    try {
+      return JSON.parse(localStorage.getItem(`blip.${key}`)) ?? fallback
+    } catch {
+      return fallback
+    }
+  },
+  set(key, value) {
+    try {
+      if (value === undefined) localStorage.removeItem(`blip.${key}`)
+      else localStorage.setItem(`blip.${key}`, JSON.stringify(value))
+    } catch {
+      // Not remembered, then.
+    }
+  },
+}
+
+// The voices on the page, the likes (null without the service), and how to
+// show the ones the search and theme pick.
+let cards = []
+let likes = null
+let refilter = () => {}
 
 // Blip's typewriter, as the plugin plays it: 30 letters a second, pauses at
 // commas and sentence ends, a blip on a letter at most every 45 ms, each cut
@@ -363,11 +464,16 @@ function card(voice) {
   copyButton(copy)
 
   if (!voice.official) {
-    const report = document.createElement('a')
-    report.className = 'report'
-    report.href = `${REPORT}&title=${encodeURIComponent(`Report: ${voice.name}`)}&voice=${encodeURIComponent(voice.name)}`
-    report.textContent = 'report'
-    item.append(report)
+    const own = remembered.get('mine', {})[voice.name]
+    if (own && own.version === voice.version) {
+      item.append(removeButton(voice, own.key, item))
+    } else {
+      const report = document.createElement('a')
+      report.className = 'report'
+      report.href = `${REPORT}&title=${encodeURIComponent(`Report: ${voice.name}`)}&voice=${encodeURIComponent(voice.name)}`
+      report.textContent = 'report'
+      item.append(report)
+    }
   }
 
   const play = item.querySelector('.play')
@@ -386,6 +492,35 @@ function card(voice) {
   })
 
   return item
+}
+
+// A voice this browser shared from here: its sharer removes it at once.
+function removeButton(voice, key, item) {
+  const button = Object.assign(document.createElement('button'), { className: 'report remove', textContent: 'remove' })
+  button.addEventListener('click', async () => {
+    if (!confirm(`Remove ${voice.name} for everyone? It leaves the site and every Blip that installed it.`)) return
+    button.disabled = true
+    try {
+      const response = await fetch(`${SHARE}/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: voice.name, key }),
+      })
+      const answer = await response.json().catch(() => ({}))
+      if (!response.ok && response.status !== 404) throw new Error(answer.error ?? 'Couldn’t remove it: try again later.')
+      const mine = remembered.get('mine', {})
+      delete mine[voice.name]
+      remembered.set('mine', mine)
+      cards = cards.filter(entry => entry.item !== item)
+      item.remove()
+      refilter()
+      toast(response.ok ? `Removed: ${voice.name} is gone within a minute.` : answer.error)
+    } catch (error) {
+      button.disabled = false
+      toast(error instanceof TypeError ? 'Couldn’t reach the site: try again.' : error.message)
+    }
+  })
+  return button
 }
 
 // Shows the cards whose theme is picked and whose words hold the search.
@@ -595,10 +730,175 @@ function wavOf(samples) {
   return new Blob([view], { type: 'audio/wav' })
 }
 
-// The form, its title and name filled in when the file's name makes a voice name.
+// The GitHub form, its title and name filled in when the name makes a voice name.
 function formUrl(name) {
   return NAME.test(name) ? `${FORM}&title=${encodeURIComponent(`Voice: ${name}`)}&name=${encodeURIComponent(name)}` : FORM
 }
+
+// What the Worker and add_voice.py take: a name forgiven its capitals and
+// spaces ("Cat Meow" is cat-meow), one of the themes, a short description,
+// and the sharer's name if they give one.
+const THEMES = ['retro', 'cute', 'soft', 'machine', 'creature', 'dark', 'weird']
+const AUTHOR = /^[\p{L}\p{N}][\p{L}\p{N} .'-]{0,23}$/u
+const nameOf = text => text.trim().toLowerCase().replace(/[\s_]+/g, '-').replace(/^-+|-+$/g, '')
+const tidy = text => text.split(/\s+/).filter(Boolean).join(' ')
+const DAY = 24 * 3600_000
+
+function base64Of(bytes) {
+  let text = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(text)
+}
+
+// Types a line out letter by letter, silently.
+function typeOut(element, text) {
+  clearInterval(element.typing)
+  let shown = 0
+  element.typing = setInterval(() => {
+    element.textContent = text.slice(0, ++shown)
+    if (shown >= text.length) clearInterval(element.typing)
+  }, 1000 / 40)
+}
+
+// Resolved once the catalog's cards are on the page (or couldn't be).
+let catalogShown
+const listed = new Promise(resolve => (catalogShown = resolve))
+
+// A voice that just went live, on top of the list; its card made again if the
+// catalog already had it, so that it gets its remove link.
+async function addCard(voice) {
+  await listed
+  const known = cards.find(entry => entry.voice.name === voice.name)
+  const entry = known ?? { voice, item: null, likes: 0 }
+  const item = card(entry.voice)
+  if (known) {
+    known.item.replaceWith(item)
+  } else {
+    cards.unshift(entry)
+    document.getElementById('voices').prepend(item)
+  }
+  entry.item = item
+  if (likes) likeButton(entry, likes)
+  refilter()
+}
+
+// ---- How far a shared voice is ---------------------------------------------
+// The Worker says which step it is at; the bar creeps through each step for
+// about as long as it usually takes, never past it.
+const STEPS = {
+  queued: { step: 1, from: 10, to: 50, takes: 20, say: 'Sent! Waiting for a robot to check it…' },
+  checking: { step: 2, from: 50, to: 75, takes: 5, say: 'Checking your sound…' },
+  publishing: { step: 3, from: 75, to: 97, takes: 8, say: 'All good! Putting it online…' },
+  live: { step: 4, from: 100, to: 100, takes: 1, say: '' },
+}
+const POLL = 2000
+const PATIENCE = 120_000
+const GIVE_UP = 30 * 60_000
+
+function tracker(fix) {
+  const box = document.getElementById('progress')
+  const meter = document.getElementById('p-meter')
+  const steps = [...document.querySelectorAll('#p-steps li')]
+  const said = document.getElementById('p-said')
+  const time = document.getElementById('p-time')
+  const live = document.getElementById('p-live')
+  const again = document.getElementById('p-again')
+  const copyLive = document.getElementById('p-copy')
+  const blocks = Array.from({ length: 20 }, () => document.createElement('i'))
+  meter.replaceChildren(...blocks)
+  copyButton(copyLive)
+  document.getElementById('p-fix').addEventListener('click', () => fix())
+  let run = 0
+
+  // Follows a shared voice until it is live or refused; `preview` is its
+  // sound when it was shared from this very page.
+  return async function track(shared, preview) {
+    const current = ++run
+    let status = 'queued'
+    let since = performance.now()
+    let isOver = false
+    let lastSaid = ''
+    const say = text => text !== lastSaid && typeOut(said, (lastSaid = text))
+
+    const draw = () => {
+      const step = STEPS[status]
+      const t = (performance.now() - since) / 1000
+      const percent = step.from + (step.to - step.from) * (1 - Math.exp(-t / step.takes))
+      const on = Math.floor(percent / 5)
+      blocks.forEach((block, i) => (block.className = i < on ? 'on' : i === on && !isOver ? 'now' : ''))
+      meter.setAttribute('aria-valuenow', String(Math.round(percent)))
+      steps.forEach((li, i) => (li.className = i < step.step ? 'done' : i === step.step && !isOver ? 'now' : ''))
+      const seconds = Math.max(0, Math.floor((Date.now() - shared.at) / 1000))
+      time.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+    }
+
+    document.getElementById('p-name').textContent = shared.name
+    live.hidden = again.hidden = true
+    meter.classList.remove('stopped')
+    box.classList.remove('done')
+    box.hidden = false
+    say(STEPS.queued.say)
+    draw()
+    const timer = setInterval(() => (current === run ? draw() : clearInterval(timer)), 100)
+
+    let answer
+    for (;;) {
+      try {
+        const response = await fetch(`${SHARE}/${shared.id}`, { cache: 'no-store' })
+        answer = response.ok ? await response.json() : response.status === 404 ? { status: 'lost' } : answer
+      } catch {
+        // Asked again in a moment.
+      }
+      if (current !== run) return
+      if (STEPS[answer?.status] && answer.status !== status) {
+        status = answer.status
+        since = performance.now()
+      }
+      const waited = Date.now() - shared.at
+      if (status === 'live' || !['queued', 'checking', 'publishing', undefined].includes(answer?.status) || waited > GIVE_UP) break
+      say(status === 'queued' && waited > PATIENCE ? 'GitHub’s robots are busy… You can close this page: it goes live by itself if it passes.' : STEPS[status].say)
+      await new Promise(resolve => setTimeout(resolve, POLL))
+    }
+
+    isOver = true
+    draw()
+    clearInterval(timer)
+    if (status !== 'live') {
+      meter.classList.add('stopped')
+      const isFinal = ['refused', 'failed', 'removed', 'lost'].includes(answer?.status)
+      if (isFinal) remembered.set('pending', undefined)
+      const reason = { lost: 'the site lost track of it', removed: 'it was removed' }[answer?.status] ?? (isFinal ? answer.reason : '')
+      say(reason ? `Couldn’t add it: ${reason}.` : 'Still not online. It may yet go live: come back later.')
+      again.hidden = !reason
+      return
+    }
+
+    remembered.set('pending', undefined)
+    remembered.set('mine', { ...remembered.get('mine', {}), [shared.name]: { key: shared.key, version: answer.version } })
+    const voice = {
+      name: shared.name,
+      author: shared.author || 'anonymous',
+      theme: shared.theme,
+      description: shared.description,
+      version: answer.version,
+      added: new Date().toISOString().slice(0, 10),
+      source: 'site',
+    }
+    if (preview) buffers.set(voice.name, preview)
+    addCard(voice)
+    box.classList.add('done')
+    const command = `/blip voice ${voice.name}`
+    copyLive.dataset.copy = command
+    copyLive.querySelector('code').textContent = command
+    live.hidden = false
+    const line = `Your voice is live! Type ${command} in Claude Code.`
+    clearInterval(said.typing)
+    if (audio?.state === 'running') speak(voice, line, typed => (said.textContent = typed)).catch(() => (said.textContent = line))
+    else typeOut(said, line)
+  }
+}
+
+// ---- Sharing a voice from here ----------------------------------------------
 
 function shareBox() {
   const drop = document.getElementById('drop')
@@ -609,9 +909,92 @@ function shareBox() {
   const hear = document.getElementById('hear')
   const save = document.getElementById('save')
   const form = document.getElementById('form')
+  const send = document.getElementById('send')
+  const sendProblem = document.getElementById('send-problem')
+  const sendButton = document.getElementById('send-button')
+  const command = document.getElementById('command')
+  const themePick = document.getElementById('f-theme')
+  const fields = {
+    name: document.getElementById('f-name'),
+    description: document.getElementById('f-description'),
+    author: document.getElementById('f-author'),
+    rules: document.getElementById('f-rules'),
+  }
   const preview = { name: ' your voice', spread: 4 }
   const line = 'Hello there! This is your voice. Shall we write some code?'
+  // The sound dropped last: its samples as the .wav takes them.
+  let sound = null
   document.querySelectorAll('.form-link').forEach(link => (link.href = FORM))
+
+  themePick.append(
+    ...THEMES.map(theme => {
+      const label = document.createElement('label')
+      label.innerHTML = '<input type="radio" name="theme"><span></span>'
+      label.querySelector('input').value = theme
+      label.querySelector('span').textContent = theme
+      return label
+    }),
+  )
+  const showCommand = () => (command.textContent = `/blip voice ${nameOf(fields.name.value) || '…'}`)
+  fields.name.addEventListener('input', showCommand)
+
+  const track = tracker(() => {
+    document.getElementById('progress').hidden = true
+    if (sound) {
+      ready.hidden = false
+      fields.name.focus()
+    } else {
+      drop.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  })
+
+  function problemAt(message, field) {
+    sendProblem.textContent = message ?? ''
+    sendProblem.hidden = !message
+    for (const [key, element] of Object.entries(fields)) element.setAttribute('aria-invalid', String(key === field))
+    themePick.classList.toggle('wrong', field === 'theme')
+    if (field === 'theme') themePick.querySelector('input')?.focus()
+    else fields[field]?.focus()
+  }
+
+  send.addEventListener('submit', async event => {
+    event.preventDefault()
+    if (!sound || sendButton.disabled) return
+    const shared = {
+      name: nameOf(fields.name.value),
+      theme: themePick.querySelector('input:checked')?.value ?? '',
+      description: tidy(fields.description.value),
+      author: tidy(fields.author.value),
+    }
+    if (!NAME.test(shared.name)) return problemAt('The name takes 2 to 20 letters, digits or dashes, like cat-meow.', 'name')
+    if (!shared.theme) return problemAt('Pick a theme.', 'theme')
+    if (!shared.description) return problemAt('Say in a few words what it sounds like.', 'description')
+    if (shared.author && !AUTHOR.test(shared.author)) return problemAt('Your name takes 1 to 24 letters, digits, spaces, dots or dashes.', 'author')
+    if (!fields.rules.checked) return problemAt('Tick the box: the sound is yours to share.', 'rules')
+    problemAt()
+    sendButton.disabled = true
+    sendButton.textContent = 'Sending…'
+    try {
+      const wav = base64Of(new Uint8Array(await wavOf(sound).arrayBuffer()))
+      const response = await fetch(SHARE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...shared, rules: true, wav }),
+      })
+      const answer = await response.json().catch(() => ({}))
+      if (!response.ok) return problemAt(answer.error ?? 'Couldn’t send it: try again in a moment.', answer.field)
+      const pending = { ...shared, name: answer.name, id: answer.id, key: answer.key, at: Date.now() }
+      remembered.set('pending', pending)
+      ready.hidden = true
+      track(pending, buffers.get(preview.name))
+      document.getElementById('progress').scrollIntoView({ behavior: 'smooth', block: 'center' })
+    } catch {
+      problemAt('Couldn’t reach the site: check your connection and try again.')
+    } finally {
+      sendButton.disabled = false
+      sendButton.textContent = 'Share it'
+    }
+  })
 
   async function listen() {
     if (ready.classList.contains('playing')) return
@@ -619,7 +1002,7 @@ function shareBox() {
     try {
       await speak(preview, line, typed => (said.textContent = typed))
     } catch {
-      said.textContent = 'Couldn’t play it here, but it may still work: save it and try.'
+      said.textContent = 'Couldn’t play it here, but it may still work.'
       return ready.classList.remove('playing')
     }
     ready.classList.remove('playing')
@@ -637,14 +1020,16 @@ function shareBox() {
       const buffer = audio.createBuffer(1, voice.length, RATE)
       buffer.copyToChannel(voice, 0)
       buffers.set(preview.name, Promise.resolve([buffer]))
+      sound = samples
 
       const stem = file.name.replace(/\.[^.]*$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'voice'
-      const saved = `${stem}-blip.wav`
       if (save.href) URL.revokeObjectURL(save.href)
       save.href = URL.createObjectURL(wavOf(samples))
-      save.download = saved
+      save.download = `${stem}-blip.wav`
       form.href = formUrl(stem)
-      document.getElementById('saved-name').textContent = saved
+      fields.name.value = NAME.test(stem) ? stem : ''
+      showCommand()
+      problemAt()
       document.getElementById('ready-name').textContent = stem
       document.getElementById('ready-length').textContent = `${(voice.length / RATE).toFixed(2)} s`
       said.textContent = line
@@ -682,6 +1067,10 @@ function shareBox() {
     drop.scrollIntoView({ behavior: 'smooth', block: 'center' })
     prepare(file)
   })
+
+  // A voice this browser was sharing when the page was left: followed again.
+  const pending = remembered.get('pending')
+  if (pending?.id && Date.now() - pending.at < DAY) track(pending)
 }
 
 async function main() {
@@ -689,8 +1078,9 @@ async function main() {
   shareBox()
   const list = document.getElementById('voices')
   try {
-    const [{ voices, themes = [] }, likes] = await Promise.all([loadCatalog(), loadLikes()])
-    const cards = voices.map(voice => ({ voice, item: card(voice), likes: 0 }))
+    const [{ voices, themes = [] }, loaded] = await Promise.all([loadCatalog(), loadLikes()])
+    likes = loaded
+    cards = voices.map(voice => ({ voice, item: card(voice), likes: 0 }))
     const none = document.createElement('li')
     none.className = 'empty'
     none.id = 'none'
@@ -711,6 +1101,7 @@ async function main() {
 
     const search = document.getElementById('search')
     let theme = 'all'
+    refilter = () => filter(cards, search.value, theme)
     const chips = ['all', ...themes].map(name => {
       const chip = document.createElement('button')
       chip.className = 'theme'
@@ -719,15 +1110,16 @@ async function main() {
       chip.addEventListener('click', () => {
         theme = name
         chips.forEach(c => c.setAttribute('aria-pressed', String(c === chip)))
-        filter(cards, search.value, theme)
+        refilter()
       })
       return chip
     })
     document.getElementById('themes').replaceChildren(...chips)
-    search.addEventListener('input', () => filter(cards, search.value, theme))
+    search.addEventListener('input', () => refilter())
   } catch {
     list.innerHTML = '<li class="empty">Couldn’t load the voices. Try again in a moment.</li>'
   }
+  catalogShown()
 }
 
 main()
