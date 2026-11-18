@@ -100,6 +100,16 @@
       "vowels": true
     },
     {
+      "name": "bassoon",
+      "author": "Pageturner",
+      "theme": "dark",
+      "description": "A deep, musical sound",
+      "license": "CC0-1.0",
+      "added": "2026-11-18",
+      "source": "site",
+      "version": "e90ea808e27f"
+    },
+    {
       "name": "tom-nook",
       "author": "DoubleV840",
       "theme": "retro",
