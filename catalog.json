@@ -100,6 +100,16 @@
       "vowels": true
     },
     {
+      "name": "bear",
+      "author": "Pageturner",
+      "theme": "creature",
+      "description": "the deep voice of a friendly creature",
+      "license": "CC0-1.0",
+      "added": "2026-11-18",
+      "source": "site",
+      "version": "a0bae1bcb3cd"
+    },
+    {
       "name": "bassoon",
       "author": "Pageturner",
       "theme": "dark",
