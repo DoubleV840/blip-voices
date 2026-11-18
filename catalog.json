@@ -100,6 +100,16 @@
       "vowels": true
     },
     {
+      "name": "big-sister",
+      "author": "Pageturner",
+      "theme": "cute",
+      "description": "your big sister's wise remonstrations",
+      "license": "CC0-1.0",
+      "added": "2026-11-18",
+      "source": "site",
+      "version": "fc26d1d71ad6"
+    },
+    {
       "name": "bear",
       "author": "Pageturner",
       "theme": "creature",
