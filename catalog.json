@@ -110,6 +110,16 @@
       "version": "9679e5eecf06"
     },
     {
+      "name": "dreamy",
+      "author": "Pageturner",
+      "theme": "soft",
+      "description": "Like Claude just woke up",
+      "license": "CC0-1.0",
+      "added": "2026-11-20",
+      "source": "site",
+      "version": "c6de041d2762"
+    },
+    {
       "name": "bootup",
       "author": "Pageturner",
       "theme": "machine",
