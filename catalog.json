@@ -120,6 +120,16 @@
       "version": "f1940f0036e4"
     },
     {
+      "name": "boot",
+      "author": "anonymous",
+      "theme": "machine",
+      "description": "like your computer just booted up",
+      "license": "CC0-1.0",
+      "added": "2026-11-23",
+      "source": "site",
+      "version": "12ee7b7d7829"
+    },
+    {
       "name": "kalimba",
       "author": "Pageturner",
       "theme": "soft",
