@@ -150,16 +150,6 @@
       "version": "c6de041d2762"
     },
     {
-      "name": "bootup",
-      "author": "Pageturner",
-      "theme": "machine",
-      "description": "Like a computer revving to life",
-      "license": "CC0-1.0",
-      "added": "2026-11-20",
-      "source": "site",
-      "version": "12ee7b7d7829"
-    },
-    {
       "name": "big-sister",
       "author": "Pageturner",
       "theme": "cute",
@@ -227,5 +217,7 @@
       "version": "ec564c43b8de"
     }
   ],
-  "removed": []
+  "removed": [
+    "bootup"
+  ]
 }
